@@ -1,7 +1,9 @@
 // Overpass and the Google Maps scraper both implement this, so
 // sweep/refresh code never hardcodes which one it's calling.
 export interface RawGym {
-  osmId?: string
+  // Caller-supplied, per-source - gym_source_refs(source, external_id)
+  // is what ties a RawGym back to a specific gyms row across refreshes.
+  externalId?: string
   name: string
   lat: number
   lng: number
