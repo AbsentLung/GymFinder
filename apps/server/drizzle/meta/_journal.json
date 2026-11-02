@@ -43,6 +43,13 @@
       "when": 1793718191855,
       "tag": "0005_normal_liz_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793733490739,
+      "tag": "0006_fearless_quicksilver",
+      "breakpoints": true
     }
   ]
 }
