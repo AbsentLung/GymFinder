@@ -5,16 +5,23 @@
   "type": "module",
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
+    "@fastify/cors": "^11.4.0",
+    "@fastify/type-provider-zod": "^1.0.3",
     "bcryptjs": "^3.0.3",
     "better-auth": "^1.7.15",
+    "bullmq": "^6.5.3",
     "cors": "^2.8.6",
     "dotenv": "^18.0.9",
     "drizzle-orm": "^0.45.4",
     "express": "^5.3.0",
+    "fastify": "^5.12.8",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "ollama": "^0.6.4",
     "pg": "^8.23.1",
-    "playwright": "^1.64.1"
+    "pg-boss": "^12.38.0",
+    "playwright": "^1.64.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
@@ -25,8 +32,10 @@
     "vitest": "^5.0.5"
   },
   "scripts": {
-    "start": "node server/index.js",
-    "test": "vitest run server",
+    "start": "tsx src/api.ts",
+    "worker": "tsx src/worker.ts",
+    "start:legacy-demo": "node server/index.js",
+    "test": "vitest run src",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
