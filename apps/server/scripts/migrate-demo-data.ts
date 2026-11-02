@@ -107,17 +107,18 @@ async function migrate() {
         gymId = existing.rows[0].gym_id
         await client.query(
           `UPDATE gyms SET name = $1, location = ST_SetSRID(ST_MakePoint($2, $3), 4326),
-             accepts_drop_in = COALESCE(accepts_drop_in, $4), has_trial = COALESCE(has_trial, $5),
-             details = details || $6::jsonb
-           WHERE id = $7`,
-          [g.name, g.lng, g.lat, g.accepts_drop_in, hasTrial, JSON.stringify(details), gymId]
+             address = COALESCE(address, $4), description = COALESCE(description, $5),
+             accepts_drop_in = COALESCE(accepts_drop_in, $6), has_trial = COALESCE(has_trial, $7),
+             details = details || $8::jsonb
+           WHERE id = $9`,
+          [g.name, g.lng, g.lat, g.address, g.description, g.accepts_drop_in, hasTrial, JSON.stringify(details), gymId]
         )
       } else {
         const { rows } = await client.query(
-          `INSERT INTO gyms (name, location, accepts_drop_in, has_trial, details)
-           VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4, $5, $6)
+          `INSERT INTO gyms (name, location, address, description, accepts_drop_in, has_trial, details)
+           VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), $4, $5, $6, $7, $8)
            RETURNING id`,
-          [g.name, g.lng, g.lat, g.accepts_drop_in, hasTrial, JSON.stringify(details)]
+          [g.name, g.lng, g.lat, g.address, g.description, g.accepts_drop_in, hasTrial, JSON.stringify(details)]
         )
         gymId = rows[0].id
         await client.query(
