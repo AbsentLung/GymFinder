@@ -1,17 +1,20 @@
-// Pulled forward from Phase 5 (full auth wiring - mounting routes,
-// session middleware, Google/Facebook/Apple providers - is still that
-// phase's job) because Phase 4's migration script needs the real table
-// shapes (`users` columns, `account.password`) to exist before it can
-// write into them. Verified live against this exact schema file via
-// `npx @better-auth/cli generate` (see src/db/schema.ts's comment on the
-// `users`/`session`/`account`/`verification` tables for what that run
-// actually confirmed).
+// Schema shape (users columns, account.password) was pulled forward
+// into Phase 3/4 since the migration script needed it to exist before
+// writing into it - see src/db/schema.ts's comment. This file is the
+// actual auth wiring: routes are mounted in src/routes/auth.ts.
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import bcrypt from "bcryptjs"
 import { db, schema } from "./db/index.js"
+import { config } from "./config.js"
 
 export const auth = betterAuth({
+  baseURL: config.betterAuthUrl,
+  // Default is "/api/auth" - without this, Better Auth's own handler
+  // 404s on every path mounted at /v1/auth/* (caught live: it parses
+  // the incoming URL against whatever basePath it's configured with,
+  // not just "whatever Fastify happened to route to it").
+  basePath: "/v1/auth",
   // Passing `schema` (confirmed against the current docs, not memory) is
   // what makes `generate` merge with the REAL `users` table (bigint id,
   // `role` column) instead of inventing its own idealized one from
@@ -32,6 +35,19 @@ export const auth = betterAuth({
       hash: (password) => bcrypt.hash(password, 10),
       verify: ({ hash, password }) => bcrypt.compare(password, hash),
     },
+  },
+  // Google and Facebook at launch (API.md 2.1 decision #7); Apple is
+  // added separately before the iOS release (Apple requires it once
+  // other social logins exist). Optional in local dev - undefined until
+  // there's a real registered OAuth app for each provider, so this
+  // can't crash a demo-mode server that doesn't have one yet.
+  socialProviders: {
+    ...(config.googleClientId && config.googleClientSecret
+      ? { google: { clientId: config.googleClientId, clientSecret: config.googleClientSecret } }
+      : {}),
+    ...(config.facebookClientId && config.facebookClientSecret
+      ? { facebook: { clientId: config.facebookClientId, clientSecret: config.facebookClientSecret } }
+      : {}),
   },
   // Better Auth defaults to its own "user" table with text/string IDs -
   // STACK_AND_SCHEMA.md 2.13 already decided bigint IDs for every table,

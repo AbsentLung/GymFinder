@@ -10,6 +10,7 @@ import { config } from "./config.js"
 import { pool } from "./db/index.js"
 import { queue } from "./queue/index.js"
 import { tilesRoutes } from "./routes/tiles.js"
+import { authRoutes } from "./routes/auth.js"
 
 export async function buildApp() {
   const app = Fastify({ logger: true })
@@ -29,6 +30,7 @@ export async function buildApp() {
     return { status: "ok" }
   })
 
+  await app.register(authRoutes)
   await app.register(tilesRoutes)
 
   return app
