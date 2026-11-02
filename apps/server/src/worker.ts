@@ -9,6 +9,7 @@ import { queue } from "./queue/index.js"
 import { refreshTile } from "./jobs/tile-refresh.js"
 import { processBotReviewChange } from "./jobs/bot-review-worker.js"
 import { processChat } from "./jobs/chat.js"
+import { processSweep } from "./jobs/sweep.js"
 import { runWatchdog } from "./jobs/watchdog.js"
 
 export async function registerWorkerJobs(): Promise<void> {
@@ -17,13 +18,14 @@ export async function registerWorkerJobs(): Promise<void> {
   })
   await queue.process<{ changeId: number }>("bot-review", processBotReviewChange)
   await queue.process<Parameters<typeof processChat>[0]>("chat", processChat)
+  await queue.process<{ requestId: number; geohash5: string }>("sweep", processSweep)
   await queue.process<Record<string, never>>("watchdog", async () => {
     await runWatchdog()
   })
   // Every minute - deadlines are ~10 minutes (API.md 2.4), so this never
   // leaves a genuinely stuck request waiting much past its own deadline.
   await queue.schedule("watchdog", "* * * * *")
-  console.log("Worker processing: tile-refresh, bot-review, chat, watchdog")
+  console.log("Worker processing: tile-refresh, bot-review, chat, sweep, watchdog")
 }
 
 async function main() {

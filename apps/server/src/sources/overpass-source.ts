@@ -41,7 +41,7 @@ export class OverpassSource implements SourceInterface {
             const name = el.tags?.name?.trim() || null
             if (!name || lat == null || lng == null) return null
             return {
-              osmId: String(el.id),
+              externalId: String(el.id),
               name,
               lat,
               lng,

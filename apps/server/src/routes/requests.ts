@@ -1,21 +1,27 @@
-// POST /v1/sweeps is deliberately NOT here yet (FR-11) - a separate
-// slice per the original "modules split so they can be built in
-// parallel" plan (STACK_AND_SCHEMA.md 1.2). This covers API.md 2.4's
-// add-gym/update-gym requests, 2.4's shared status/retry endpoints, and
-// 2.5's "My requests" listing - the add-gym and update-gym routes share
-// almost everything (one request + one gym_changes row, then a queued
-// bot-review job), so building them together was the natural cut.
+// API.md 2.4's add-gym/update-gym/sweep requests, 2.4's shared status/
+// retry endpoints, and 2.5's "My requests" listing - all share enough
+// (one request row, a derived status, a common response shape) that
+// building them together was the natural cut.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
-import { and, desc, eq, lt } from "drizzle-orm"
+import { and, desc, eq, lt, sql } from "drizzle-orm"
 import { db } from "../db/index.js"
-import { gymChanges, gyms, requests } from "../db/schema.js"
+import { gymChanges, gyms, requests, tileFetches } from "../db/schema.js"
+import { queue } from "../queue/index.js"
 import { requireUser } from "../auth-guard.js"
-import { requireDescription, GYM_CATEGORIES } from "../lib.js"
+import { requireDescription, GYM_CATEGORIES, isWithinStaleWindow } from "../lib.js"
 import { NON_PRICE_FIELDS, createGymChange } from "../jobs/bot-review.js"
 import type { ProposedChange } from "../jobs/bot-review.js"
 
 const BOT_REVIEW_DEADLINE_MS = 10 * 60 * 1000
+const SWEEP_DEADLINE_MS = 60 * 60 * 1000
+// "Recently swept" - no number given in the docs for this specifically;
+// reusing tiles.ts's own week-long Overpass-staleness window rather
+// than inventing a different one with no basis.
+const SWEEP_STALE_MS = 7 * 24 * 60 * 60 * 1000
+const GEOHASH5_PATTERN = /^[0-9b-hj-km-np-z]{5}$/
+
+const sweepBodySchema = z.object({ geohash: z.string().regex(GEOHASH5_PATTERN, "must be a 5-character geohash") })
 
 const priceProposalSchema = z.object({
   priceKind: z.enum(["day_pass", "week_pass", "month_pass"]),
@@ -131,6 +137,63 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   )
 
+  app.post(
+    "/v1/sweeps",
+    { preHandler: requireUser, schema: { body: sweepBodySchema } },
+    async (request, reply) => {
+      const { geohash } = request.body
+
+      // "A tile swept recently returns 200 with an already-completed
+      // request" (API.md 2.4) - reusing tile_fetches' own (geohash,
+      // source) staleness tracking rather than a second table, same as
+      // tiles.ts does for Overpass.
+      const [fetchRow] = await db
+        .select()
+        .from(tileFetches)
+        .where(and(eq(tileFetches.geohash, geohash), eq(tileFetches.source, "google_maps")))
+      if (fetchRow && isWithinStaleWindow(fetchRow.lastFetchedAt, SWEEP_STALE_MS)) {
+        const [recent] = await db
+          .select()
+          .from(requests)
+          .where(and(eq(requests.kind, "sweep"), sql`${requests.input}->>'geohash' = ${geohash}`))
+          .orderBy(desc(requests.id))
+          .limit(1)
+        if (recent) return serializeRequest(recent.id)
+        // No stored request to point at (e.g. this cell was last swept
+        // before sweeps produced one) - report from tile_fetches alone
+        // rather than fail; there's nothing new to find either way.
+        return {
+          id: null,
+          kind: "sweep",
+          status: "completed",
+          createdAt: fetchRow.lastFetchedAt,
+          deadline: fetchRow.lastFetchedAt,
+          result: { gymsFound: fetchRow.gymsFound ?? 0, gymsNew: 0 },
+          failureReason: null,
+          changes: [],
+        }
+      }
+
+      // "A tile already queued attaches to the existing job" - same
+      // dedup intent as tiles.ts's jobId, but a sweep has a `requests`
+      // row to attach to directly.
+      const [pending] = await db
+        .select()
+        .from(requests)
+        .where(and(eq(requests.kind, "sweep"), eq(requests.status, "pending"), sql`${requests.input}->>'geohash' = ${geohash}`))
+        .limit(1)
+      if (pending) return serializeRequest(pending.id)
+
+      const [created] = await db
+        .insert(requests)
+        .values({ userId: request.sessionUser!.id, kind: "sweep", deadline: new Date(Date.now() + SWEEP_DEADLINE_MS), input: { geohash } })
+        .returning()
+      await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep:${geohash}` })
+      reply.status(202)
+      return serializeRequest(created.id)
+    }
+  )
+
   app.get(
     "/v1/requests/:id",
     { preHandler: requireUser, schema: { params: z.object({ id: z.coerce.number().int() }) } },
@@ -158,6 +221,16 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
         const proposed: ProposedChange = { kind: "add_gym", ...input }
         const requestId = await createRequest(request.sessionUser!.id, "add_gym", input, null, proposed)
         return serializeRequest(requestId)
+      }
+
+      if (row.kind === "sweep") {
+        const { geohash } = row.input as { geohash: string }
+        const [created] = await db
+          .insert(requests)
+          .values({ userId: request.sessionUser!.id, kind: "sweep", deadline: new Date(Date.now() + SWEEP_DEADLINE_MS), input: { geohash } })
+          .returning()
+        await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep:${geohash}` })
+        return serializeRequest(created.id)
       }
 
       const input = row.input as ChangeBody & { gymId: number }
