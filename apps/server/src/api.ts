@@ -13,6 +13,7 @@ import { requestsRoutes } from "./routes/requests.js"
 import { adminRoutes } from "./routes/admin.js"
 import { gymsRoutes } from "./routes/gyms.js"
 import { chatRoutes } from "./routes/chat.js"
+import { meRoutes } from "./routes/me.js"
 
 export async function buildApp() {
   const app = Fastify({ logger: true })
@@ -38,6 +39,7 @@ export async function buildApp() {
   await app.register(adminRoutes)
   await app.register(gymsRoutes)
   await app.register(chatRoutes)
+  await app.register(meRoutes)
 
   return app
 }

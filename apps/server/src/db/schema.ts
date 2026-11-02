@@ -225,11 +225,9 @@ export const requests = pgTable(
   "requests",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    // Signed-out users can't create a request (FR-15) - only chat is
-    // open to them, and a chat never becomes a `requests` row.
-    userId: bigint("user_id", { mode: "number" })
-      .notNull()
-      .references(() => users.id),
+    // Signed-out users can't create a request (FR-15). Nullable with
+    // onDelete: "set null" - deleting a user keeps the request, unlinked.
+    userId: bigint("user_id", { mode: "number" }).references(() => users.id, { onDelete: "set null" }),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("pending"),
     deadline: timestamp("deadline", { withTimezone: true }).notNull(),
@@ -285,11 +283,27 @@ export const tileFetches = pgTable(
   (table) => [uniqueIndex("tile_fetches_geohash_source_unique").on(table.geohash, table.source)]
 )
 
-// A single-row cache, not a history table - "daily rates table" (API.md
-// 2.8) just means "shared across processes/workers", unlike the old
-// demo's in-memory fxCache (server/index.js) which each process would
-// otherwise refetch independently. src/fx.ts upserts this one row at
-// most once a day; nothing ever reads a past day's rates.
+// Unique on token alone (not per-user) - re-registering the same
+// device's token moves/updates the existing row, not a second one.
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    platform: text("platform").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("push_tokens_user_id_idx").on(table.userId),
+    check("push_tokens_platform_check", sql`${table.platform} IN ('ios', 'android', 'web')`),
+  ]
+)
+
+// A single-row cache, not a history table - shared across processes,
+// unlike the old demo's per-process in-memory fxCache.
 export const fxRates = pgTable("fx_rates", {
   id: text("id").primaryKey().default("latest"),
   rates: jsonb("rates").notNull(),
@@ -303,8 +317,10 @@ export const reviews = pgTable(
     gymId: bigint("gym_id", { mode: "number" })
       .notNull()
       .references(() => gyms.id, { onDelete: "cascade" }),
-    // Nullable: migrated demo reviews have no user_id.
-    userId: bigint("user_id", { mode: "number" }).references(() => users.id),
+    // Nullable: migrated demo reviews have no user_id. onDelete:
+    // "cascade" - deleting a user removes their reviews (unlike
+    // requests, which are kept but unlinked).
+    userId: bigint("user_id", { mode: "number" }).references(() => users.id, { onDelete: "cascade" }),
     rating: smallint("rating").notNull(),
     body: text("body"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
