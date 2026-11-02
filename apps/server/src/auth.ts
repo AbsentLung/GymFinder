@@ -36,7 +36,13 @@ export const auth = betterAuth({
   },
   // Remaps Better Auth's default text-id "user" table onto this app's
   // bigint-id `users`.
-  user: { modelName: "users" },
+  user: {
+    modelName: "users",
+    // Without this, `role` is invisible to auth.api.getSession() even
+    // though the column exists - additionalFields is what exposes it.
+    // input: false - only PATCH /v1/admin/users/{id} can change it.
+    additionalFields: { role: { type: "string", input: false, defaultValue: "user" } },
+  },
   // Keeps every Better-Auth-owned table on bigint ids too, so their FKs
   // against users.id aren't type-mismatched.
   advanced: {

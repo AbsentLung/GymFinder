@@ -8,6 +8,7 @@ import {
   isBboxCovered,
   getCountryCurrency,
   convertToUsdCents,
+  amountMinorToMajor,
   extractLatLngFromMapsHref,
   bboxToGoogleMapsZoom,
   categoriesFromRawText,
@@ -120,6 +121,15 @@ describe("convertToUsdCents", () => {
   })
   it("throws on an unknown currency rather than silently guessing", () => {
     expect(() => convertToUsdCents(100, "ZZZ", { THB: 33.76 })).toThrow()
+  })
+})
+
+describe("amountMinorToMajor", () => {
+  it("divides by 100 for a normal (2-decimal) currency", () => {
+    expect(amountMinorToMajor(1500, "USD")).toBe(15)
+  })
+  it("passes a zero-decimal currency straight through - confirmed against API.md's own gym_prices example (150000 IDR amountMinor -> 950 usdCents, a realistic ~$9.50 day pass)", () => {
+    expect(amountMinorToMajor(150000, "IDR")).toBe(150000)
   })
 })
 

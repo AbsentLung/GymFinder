@@ -278,6 +278,17 @@ export const tileFetches = pgTable(
   (table) => [uniqueIndex("tile_fetches_geohash_source_unique").on(table.geohash, table.source)]
 )
 
+// A single-row cache, not a history table - "daily rates table" (API.md
+// 2.8) just means "shared across processes/workers", unlike the old
+// demo's in-memory fxCache (server/index.js) which each process would
+// otherwise refetch independently. src/fx.ts upserts this one row at
+// most once a day; nothing ever reads a past day's rates.
+export const fxRates = pgTable("fx_rates", {
+  id: text("id").primaryKey().default("latest"),
+  rates: jsonb("rates").notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const reviews = pgTable(
   "reviews",
   {
