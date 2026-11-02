@@ -32,6 +32,7 @@
     "vitest": "^5.0.5"
   },
   "scripts": {
+    "dev": "tsx src/dev.ts",
     "start": "tsx src/api.ts",
     "worker": "tsx src/worker.ts",
     "start:legacy-demo": "node server/index.js",

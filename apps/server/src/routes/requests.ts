@@ -4,14 +4,12 @@
 // POST /v1/sweeps is a separate slice, not here yet.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
-import { and, desc, eq, lt, sql } from "drizzle-orm"
+import { and, desc, eq, lt } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, gyms, requests } from "../db/schema.js"
-import { queue } from "../queue/index.js"
 import { requireUser } from "../auth-guard.js"
-import { requireDescription, GYM_CATEGORIES, convertToUsdCents, amountMinorToMajor } from "../lib.js"
-import { getFxRates } from "../fx.js"
-import { NON_PRICE_FIELDS } from "../jobs/bot-review.js"
+import { requireDescription, GYM_CATEGORIES } from "../lib.js"
+import { NON_PRICE_FIELDS, createGymChange } from "../jobs/bot-review.js"
 import type { ProposedChange } from "../jobs/bot-review.js"
 
 const BOT_REVIEW_DEADLINE_MS = 10 * 60 * 1000
@@ -88,26 +86,9 @@ async function createRequest(userId: number, kind: "add_gym" | "update_gym", inp
     .values({ userId, kind, deadline: new Date(Date.now() + BOT_REVIEW_DEADLINE_MS), input })
     .returning()
 
-  await db.insert(gymChanges).values({ requestId: request.id, gymId, proposed })
-
-  // A price change is visible the moment it's submitted, unlike every
-  // other kind - stored straight away as unverified, independent of
-  // whatever bot review decides.
-  if (proposed.kind === "price" && gymId) {
-    const rates = proposed.currency === "USD" ? {} : await getFxRates()
-    const usdCents = convertToUsdCents(amountMinorToMajor(proposed.amountMinor, proposed.currency), proposed.currency, rates)
-    await db.execute(sql`
-      INSERT INTO gym_prices (gym_id, kind, amount_minor, currency, usd_cents, source_kind, source_url, menu_posted_on)
-      VALUES (${gymId}, ${proposed.priceKind}, ${proposed.amountMinor}, ${proposed.currency},
-        ${usdCents}, ${proposed.sourceKind}, ${proposed.sourceUrl ?? null}, ${proposed.menuPostedOn ?? null})
-      ON CONFLICT (gym_id, kind, is_verified)
-      DO UPDATE SET amount_minor = EXCLUDED.amount_minor, currency = EXCLUDED.currency, usd_cents = EXCLUDED.usd_cents,
-        source_kind = EXCLUDED.source_kind, source_url = EXCLUDED.source_url, menu_posted_on = EXCLUDED.menu_posted_on, last_seen_at = now()
-    `)
-  }
-
-  // "-" not ":" - BullMQ rejects a custom id containing a colon.
-  await queue.add("bot-review", { requestId: request.id }, { jobId: `bot-review-${request.id}` })
+  // createGymChange is the one path every change creator uses - it also
+  // handles a price's immediate-unverified write and queues bot-review.
+  await createGymChange(request.id, gymId, proposed)
   return request.id
 }
 
