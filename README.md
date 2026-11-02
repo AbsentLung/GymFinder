@@ -104,31 +104,33 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 
    ```bash
    createdb travelapp
-   psql -d travelapp -f db/schema.sql
-   psql -d travelapp -f db/seed.sql
+   psql -d travelapp -f apps/server/db/schema.sql
+   psql -d travelapp -f apps/server/db/seed.sql
    ```
 
 3. Set up your `.env`
 
    ```bash
-   cp .env.example .env
-   # then edit .env and fill in ANTHROPIC_API_KEY (needed for the "Ask me
-   # questions about this gym" chat feature) and JWT_SECRET (signs login
-   # session tokens - any long random string works, .env.example shows
-   # how to generate one)
+   cp apps/server/.env.example apps/server/.env
+   # then edit apps/server/.env and fill in ANTHROPIC_API_KEY (needed for
+   # the "Ask me questions about this gym" chat feature) and JWT_SECRET
+   # (signs login session tokens - any long random string works,
+   # .env.example shows how to generate one)
    ```
 
 4. Start the backend API server (in one terminal, stays running)
 
    ```bash
-   node server/index.js
+   npm run server
    ```
 
 5. Start the app (in another terminal)
 
    ```bash
-   npx expo start
+   npm run mobile
    ```
+
+This is an npm-workspaces monorepo (`apps/mobile`, `apps/server`, `packages/shared`, `infra/` - see the [Roadmap](#roadmap)'s Phase 2). Steps 4-5 above run each app's own script from the repo root; `cd apps/mobile` or `cd apps/server` and run their scripts directly works the same way.
 
 ### Database setup
 
@@ -139,9 +141,9 @@ brew install postgresql@16
 brew services start postgresql@16
 ```
 
-Then run the three commands in step 2 above. `db/schema.sql` is a full schema dump (tables, the `gym_data_source` enum, indexes, foreign keys, the `pg_trgm` extension used for gym-name duplicate matching); `db/seed.sql` adds the couple of reference rows the app actually needs to run (submission status labels, the bot's sentinel admin row) - it does *not* seed any gym data. Gyms populate live the same way they do for everyone: search a city and the server pulls real gyms from OpenStreetMap on the fly.
+Then run the three commands in step 2 above. `apps/server/db/schema.sql` is a full schema dump (tables, the `gym_data_source` enum, indexes, foreign keys, the `pg_trgm` extension used for gym-name duplicate matching); `apps/server/db/seed.sql` adds the couple of reference rows the app actually needs to run (submission status labels, the bot's sentinel admin row) - it does *not* seed any gym data. Gyms populate live the same way they do for everyone: search a city and the server pulls real gyms from OpenStreetMap on the fly. This is the demo schema (`GymFinderVibeCoded`'s `server/`, `db/`); the real schema from STACK_AND_SCHEMA.md part 2 lands in Phase 3.
 
-If your Postgres setup needs a specific host/user/password (not just your local default), set the standard `PGHOST`/`PGUSER`/`PGPASSWORD`/`PGPORT` environment variables - `server/index.js` doesn't hardcode a connection beyond the database name, so it picks those up automatically.
+If your Postgres setup needs a specific host/user/password (not just your local default), set the standard `PGHOST`/`PGUSER`/`PGPASSWORD`/`PGPORT` environment variables - `apps/server/server/index.js` doesn't hardcode a connection beyond the database name, so it picks those up automatically.
 
 ### Accounts and admins
 
@@ -164,7 +166,7 @@ brew services start ollama
 ollama pull qwen2.5:3b   # or whatever OLLAMA_MODEL is set to in .env
 ```
 
-This is a genuine tradeoff, not a free upgrade: a small local model is noticeably less reliable than Anthropic's hosted one at actually calling the right tool with the right data (expect more "found a price but didn't record it"-type misses), and it has no real web search of its own - `server/ai.js` gives it a DuckDuckGo-HTML-scraping tool to stand in for Anthropic's hosted search, which works but is an unofficial surface that could break if DuckDuckGo changes their markup. Flip `AI_PROVIDER` back to `anthropic` (or just unset it) for anything you want to trust, including production.
+This is a genuine tradeoff, not a free upgrade: a small local model is noticeably less reliable than Anthropic's hosted one at actually calling the right tool with the right data (expect more "found a price but didn't record it"-type misses), and it has no real web search of its own - `apps/server/server/ai.js` gives it a DuckDuckGo-HTML-scraping tool to stand in for Anthropic's hosted search, which works but is an unofficial surface that could break if DuckDuckGo changes their markup. Flip `AI_PROVIDER` back to `anthropic` (or just unset it) for anything you want to trust, including production.
 
 In the output, you'll find options to open the app in a
 
