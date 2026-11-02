@@ -11,6 +11,7 @@ import { tilesRoutes } from "./routes/tiles.js"
 import { authRoutes } from "./routes/auth.js"
 import { requestsRoutes } from "./routes/requests.js"
 import { adminRoutes } from "./routes/admin.js"
+import { gymsRoutes } from "./routes/gyms.js"
 
 export async function buildApp() {
   const app = Fastify({ logger: true })
@@ -34,6 +35,7 @@ export async function buildApp() {
   await app.register(tilesRoutes)
   await app.register(requestsRoutes)
   await app.register(adminRoutes)
+  await app.register(gymsRoutes)
 
   return app
 }
