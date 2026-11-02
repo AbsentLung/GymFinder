@@ -5,12 +5,16 @@
 // drizzle-kit (see drizzle.config.ts). The one-off migration script in
 // Phase 4 reads the old schema and writes into tables defined here.
 //
-// Better Auth will add its own `session`, `account` and `verification`
-// tables alongside `users` in Phase 5 (and likely a few more columns on
-// `users` itself, e.g. emailVerified/name/image) - STACK_AND_SCHEMA.md
-// 2.2 says as much ("they're not shown" in its ER diagram). Not added
-// here since Phase 3 is schema-only and Better Auth's own CLI generates
-// that part when auth is actually wired up.
+// Better Auth's session/account/verification tables (and the extra
+// columns on `users`) are defined below too, pulled forward from Phase 5
+// - STACK_AND_SCHEMA.md 2.2 says they're not shown in its ER diagram and
+// implied they'd land when auth is actually wired up, but Phase 4's
+// migration script needs `account.password` to exist to carry over
+// existing bcrypt hashes, so the table shape has to exist first. The
+// full auth wiring (mounting routes, session middleware, social
+// providers) is still Phase 5 - this is schema only, same as everything
+// else in this file. See src/auth.ts for the Better Auth config used to
+// generate/verify this against the real thing.
 
 import { sql, type SQL } from "drizzle-orm"
 import {
@@ -55,14 +59,109 @@ const point = customType<{ data: { lat: number; lng: number }; driverData: strin
   },
 })
 
+// name/emailVerified/image/createdAt/updatedAt are Better Auth's own
+// required columns on its user model (confirmed live via
+// `npx @better-auth/cli generate` against this exact table, pointed at
+// this schema file via drizzleAdapter's `schema` option - see
+// src/auth.ts). Everything else here (id, email, role) is this app's
+// own, unchanged. Better Auth defaults to a separate "user" table with
+// text ids; remapped to this one via `user: { modelName: "users" }` and
+// `advanced.database.generateId: "serial"` in auth.ts so it participates
+// in the bigint-everywhere scheme STACK_AND_SCHEMA.md 2.13 decided,
+// instead of introducing a second, text-keyed identity table.
 export const users = pgTable(
   "users",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
     email: text("email").notNull().unique(),
     role: text("role").notNull().default("user"),
+    name: text("name").notNull().default(""),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [check("users_role_check", sql`${table.role} IN ('user', 'admin')`)]
+)
+
+// Better Auth's own tables (session, account, verification) - added
+// here rather than left to its CLI's standalone output because that
+// output doesn't know this app already uses bigint ids everywhere; it
+// emits an internally-consistent set, but hand-matching it to this
+// file's existing `bigserial`/`bigint` convention (rather than trusting
+// its own int/serial choice) keeps one single ID scheme across every
+// table, not just the ones Better Auth happens to control.
+// Export name must be exactly "session" (singular) - Better Auth's
+// drizzle adapter looks up tables by export identifier from the schema
+// module passed to it, not just by SQL table name, confirmed live (it
+// kept reporting these as "missing" with a plural export name even
+// after the migration creating them had already run).
+export const session = pgTable(
+  "session",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("session_user_id_idx").on(table.userId)]
+)
+
+export const account = pgTable(
+  "account",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // "credential" for email+password; "google"/"facebook"/"apple" for
+    // social sign-in (API.md 2.1). accountId is the provider's own id
+    // for this account - for "credential" that's just the user's own id.
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    // The migrated bcrypt hash lands here for existing demo accounts
+    // (Phase 4) - Better Auth's emailAndPassword.password.hash/verify
+    // can be pointed at bcryptjs so these keep working unchanged
+    // (confirmed against the current docs, not memory), rather than
+    // forcing every migrated user through a password reset.
+    password: text("password"),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    scope: text("scope"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("account_user_id_idx").on(table.userId),
+    // Better Auth looks accounts up by this pair - also what makes the
+    // migration script's account insert idempotent (caught live: without
+    // this, re-running the migration doubled every account row, since
+    // `ON CONFLICT DO NOTHING` with no matching constraint has nothing
+    // to treat as a conflict and just inserts again).
+    uniqueIndex("account_provider_account_unique").on(table.providerId, table.accountId),
+  ]
+)
+
+export const verification = pgTable(
+  "verification",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("verification_identifier_idx").on(table.identifier)]
 )
 
 export const gyms = pgTable(
