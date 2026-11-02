@@ -127,7 +127,8 @@ The app calls Photon (location search) and the base map tiles directly. Only wor
 - **Chats are temporary.** Chat questions and answers are never stored in Postgres or logs. Answers live in the cache for about 15 minutes under a random chat ID; follow-ups send recent messages along. Useful facts from a chat are still proposed as `gym_changes`.
 - **Zoom 11 rule.** Gyms, filters and tile loading only happen at zoom 11 and above (`MIN_GYM_ZOOM = 11`). Below that, no tiles are requested or cached.
 - **Tiles.** The map loads geohash4 tiles; Overpass refreshes (about weekly) and sweeps work on geohash5 cells. Stale tiles are served at once and refreshed in the background. An approved change invalidates its tile in the CDN.
-- **UI stays as it is.** The vibe-coded app's UI (`GymFinderVibeCoded` branch) is kept: right sidebar with collapsible sections, filter chips, day-pass list, gym panel, add/edit flows. The restructure changes what's underneath, not how it looks. The only addition is an Edit button on your own review.
+- **UI stays as it is.** The vibe-coded app's UI (`GymFinderVibeCoded` branch) is kept: right sidebar with collapsible sections, filter chips, day-pass list, gym panel, add/edit flows. The restructure changes what's underneath, not how it looks. The only additions are an Edit button on your own review and a Share button on phones.
+- **Shareable map links.** The map URL holds position, zoom, the open gym and active filters, and opening it restores that view. Phones get a Share button that sends the same web link, and universal/app links open it in the app when installed.
 - **Filters run in the app** on loaded tiles, exactly as in the vibe-coded app. No price filter and no server search.
 - **No secrets in the repo.** Config lives in env vars and SSM.
 - **LLM behind one interface**, so Ollama can be swapped for Claude without touching business code.
