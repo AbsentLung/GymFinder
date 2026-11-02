@@ -7,14 +7,12 @@
 // bot-review job), so building them together was the natural cut.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
-import { and, desc, eq, lt, sql } from "drizzle-orm"
+import { and, desc, eq, lt } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, gyms, requests } from "../db/schema.js"
-import { queue } from "../queue/index.js"
 import { requireUser } from "../auth-guard.js"
-import { requireDescription, GYM_CATEGORIES, convertToUsdCents, amountMinorToMajor } from "../lib.js"
-import { getFxRates } from "../fx.js"
-import { NON_PRICE_FIELDS } from "../jobs/bot-review.js"
+import { requireDescription, GYM_CATEGORIES } from "../lib.js"
+import { NON_PRICE_FIELDS, createGymChange } from "../jobs/bot-review.js"
 import type { ProposedChange } from "../jobs/bot-review.js"
 
 const BOT_REVIEW_DEADLINE_MS = 10 * 60 * 1000
@@ -91,26 +89,11 @@ async function createRequest(userId: number, kind: "add_gym" | "update_gym", inp
     .values({ userId, kind, deadline: new Date(Date.now() + BOT_REVIEW_DEADLINE_MS), input })
     .returning()
 
-  await db.insert(gymChanges).values({ requestId: request.id, gymId, proposed })
-
-  // A price change is visible the moment it's submitted, unlike every
-  // other change kind - STACK_AND_SCHEMA.md 2.6: "An unverified price is
-  // stored straight away... so users see it at once, clearly marked
-  // unverified," independent of whatever gym_changes/bot review decides.
-  if (proposed.kind === "price" && gymId) {
-    const rates = proposed.currency === "USD" ? {} : await getFxRates()
-    const usdCents = convertToUsdCents(amountMinorToMajor(proposed.amountMinor, proposed.currency), proposed.currency, rates)
-    await db.execute(sql`
-      INSERT INTO gym_prices (gym_id, kind, amount_minor, currency, usd_cents, source_kind, source_url, menu_posted_on)
-      VALUES (${gymId}, ${proposed.priceKind}, ${proposed.amountMinor}, ${proposed.currency},
-        ${usdCents}, ${proposed.sourceKind}, ${proposed.sourceUrl ?? null}, ${proposed.menuPostedOn ?? null})
-      ON CONFLICT (gym_id, kind, is_verified)
-      DO UPDATE SET amount_minor = EXCLUDED.amount_minor, currency = EXCLUDED.currency, usd_cents = EXCLUDED.usd_cents,
-        source_kind = EXCLUDED.source_kind, source_url = EXCLUDED.source_url, menu_posted_on = EXCLUDED.menu_posted_on, last_seen_at = now()
-    `)
-  }
-
-  await queue.add("bot-review", { requestId: request.id }, { jobId: `bot-review:${request.id}` })
+  // createGymChange (src/jobs/bot-review.ts) is the one path every
+  // change creator uses - it also handles a price's immediate-unverified-
+  // visibility write (STACK_AND_SCHEMA.md 2.6) and queues the bot-review
+  // job, so this route doesn't duplicate either.
+  await createGymChange(request.id, gymId, proposed)
   return request.id
 }
 

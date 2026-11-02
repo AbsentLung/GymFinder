@@ -1,25 +1,34 @@
 // Worker entry point - picks up jobs the API enqueued (DESIGN_DISCUSSION.md
-// Option B). In demo mode this can run in the same process as the API
-// (see package.json's "dev" script); scale mode deploys it separately,
-// auto-scaled on queue depth.
+// Option B). registerWorkerJobs is exported so src/dev.ts (demo mode's
+// combined API+worker process, per DESIGN_DISCUSSION.md section 6:
+// "API + workers + queue can all run inside one process in demo mode")
+// can register the same processors without a second queue.start() call;
+// this file's own main() below is the scale-mode standalone worker
+// process, started separately from the API.
 import { queue } from "./queue/index.js"
 import { refreshTile } from "./jobs/tile-refresh.js"
-import { processBotReview } from "./jobs/bot-review-worker.js"
+import { processBotReviewChange } from "./jobs/bot-review-worker.js"
+import { processChat } from "./jobs/chat.js"
 import { runWatchdog } from "./jobs/watchdog.js"
 
-async function main() {
-  await queue.start()
+export async function registerWorkerJobs(): Promise<void> {
   await queue.process<{ geohash5: string }>("tile-refresh", async (payload) => {
     await refreshTile(payload)
   })
-  await queue.process<{ requestId: number }>("bot-review", processBotReview)
+  await queue.process<{ changeId: number }>("bot-review", processBotReviewChange)
+  await queue.process<Parameters<typeof processChat>[0]>("chat", processChat)
   await queue.process<Record<string, never>>("watchdog", async () => {
     await runWatchdog()
   })
   // Every minute - deadlines are ~10 minutes (API.md 2.4), so this never
   // leaves a genuinely stuck request waiting much past its own deadline.
   await queue.schedule("watchdog", "* * * * *")
-  console.log("Worker started, processing: tile-refresh, bot-review, watchdog")
+  console.log("Worker processing: tile-refresh, bot-review, chat, watchdog")
+}
+
+async function main() {
+  await queue.start()
+  await registerWorkerJobs()
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

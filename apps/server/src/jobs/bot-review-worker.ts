@@ -1,28 +1,29 @@
-// Queue job handler for "bot-review" (enqueued by src/routes/requests.ts
-// right after a request/gym_changes row is created - "anything that
-// goes through a queue... can't answer in the same request", API.md
-// 1.3). Runs every gym_changes row still pending_bot for one request
-// through verifyGymChange and records the outcome.
-import { eq, and } from "drizzle-orm"
+// Queue job handler for "bot-review" - one job per gym_changes row
+// (enqueued by src/jobs/bot-review.ts's createGymChange, the one path
+// every change creator uses). Per-change, not per-request: a chat-found
+// fact (src/jobs/chat.ts) has no request at all, so keying this on
+// requestId the way the first version of this file did couldn't have
+// handled it.
+import { eq } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges } from "../db/schema.js"
 import { verifyGymChange, applyDecision, recomputeRequestStatus } from "./bot-review.js"
+import type { ProposedChange } from "./bot-review.js"
 
-export async function processBotReview({ requestId }: { requestId: number }): Promise<void> {
-  const pending = await db
-    .select()
-    .from(gymChanges)
-    .where(and(eq(gymChanges.requestId, requestId), eq(gymChanges.reviewStatus, "pending_bot")))
+export async function processBotReviewChange({ changeId }: { changeId: number }): Promise<void> {
+  const [change] = await db.select().from(gymChanges).where(eq(gymChanges.id, changeId))
+  // Already decided (e.g. an admin got to it first) - nothing to do.
+  if (!change || change.reviewStatus !== "pending_bot") return
 
-  for (const change of pending) {
-    const result = await verifyGymChange(change.proposed as Parameters<typeof verifyGymChange>[0], change.gymId)
+  const result = await verifyGymChange(change.proposed as ProposedChange, change.gymId)
 
-    if (result.reviewStatus === "awaiting_admin") {
-      await db.update(gymChanges).set({ reviewStatus: "awaiting_admin", evidence: result.evidence }).where(eq(gymChanges.id, change.id))
-    } else {
-      await applyDecision(change.id, { reviewStatus: result.reviewStatus, decidedBy: result.decidedBy ?? "bot", evidence: result.evidence })
-    }
+  if (result.reviewStatus === "awaiting_admin") {
+    await db.update(gymChanges).set({ reviewStatus: "awaiting_admin", evidence: result.evidence }).where(eq(gymChanges.id, changeId))
+    // Still open - applyDecision (the other branch) recomputes this
+    // itself after a terminal decision; awaiting_admin needs the same
+    // call here since nothing else will make it.
+    if (change.requestId) await recomputeRequestStatus(change.requestId)
+  } else {
+    await applyDecision(changeId, { reviewStatus: result.reviewStatus, decidedBy: result.decidedBy ?? "bot", evidence: result.evidence })
   }
-
-  await recomputeRequestStatus(requestId)
 }

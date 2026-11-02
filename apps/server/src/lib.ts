@@ -68,6 +68,13 @@ export function amountMinorToMajor(amountMinor: number, currency: string): numbe
   return ZERO_DECIMAL_CURRENCIES.has(currency) ? amountMinor : amountMinor / 100
 }
 
+// Inverse of amountMinorToMajor - needed wherever a major-unit amount
+// comes from somewhere OTHER than our own amountMinor storage (e.g. a
+// number the chat LLM reports from a page it read, src/jobs/chat.ts).
+export function amountMajorToMinor(amountMajor: number, currency: string): number {
+  return Math.round(ZERO_DECIMAL_CURRENCIES.has(currency) ? amountMajor : amountMajor * 100)
+}
+
 // Google Maps result-list links embed exact coordinates directly in the
 // href (e.g. "...!3d18.7992624!4d98.9883932...").
 export function extractLatLngFromMapsHref(href: string): { lat: number; lng: number } | null {

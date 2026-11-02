@@ -7,6 +7,7 @@ import {
   getCountryCurrency,
   convertToUsdCents,
   amountMinorToMajor,
+  amountMajorToMinor,
   extractLatLngFromMapsHref,
   bboxToGoogleMapsZoom,
   categoriesFromRawText,
@@ -107,6 +108,15 @@ describe("amountMinorToMajor", () => {
   })
   it("passes a zero-decimal currency straight through - confirmed against API.md's own gym_prices example (150000 IDR amountMinor -> 950 usdCents, a realistic ~$9.50 day pass)", () => {
     expect(amountMinorToMajor(150000, "IDR")).toBe(150000)
+  })
+})
+
+describe("amountMajorToMinor", () => {
+  it("is the exact inverse of amountMinorToMajor for a normal currency", () => {
+    expect(amountMajorToMinor(amountMinorToMajor(1500, "USD"), "USD")).toBe(1500)
+  })
+  it("is the exact inverse of amountMinorToMajor for a zero-decimal currency", () => {
+    expect(amountMajorToMinor(amountMinorToMajor(150000, "IDR"), "IDR")).toBe(150000)
   })
 })
 

@@ -11,6 +11,7 @@ import { sql, eq } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, requests } from "../db/schema.js"
 import { llm } from "../llm/index.js"
+import { queue } from "../queue/index.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
 import { reverseGeocode } from "../geocode.js"
 import { getFxRates } from "../fx.js"
@@ -349,6 +350,37 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
 async function resolveUsdCents(amountMinor: number, currency: string): Promise<number> {
   const rates = currency === "USD" ? {} : await getFxRates()
   return convertToUsdCents(amountMinorToMajor(amountMinor, currency), currency, rates)
+}
+
+// A price change is visible the moment it's submitted, unlike every
+// other change kind (STACK_AND_SCHEMA.md 2.6's asymmetry) - shared by
+// both real creators of a "price" gym_changes row: a user's own request
+// (src/routes/requests.ts) and a fact the chatbot finds (src/jobs/chat.ts,
+// FR-9 - which has no `requests` row to route through createRequest at
+// all, API.md 1.4).
+export async function insertUnverifiedPrice(gymId: number, proposed: PriceProposal): Promise<void> {
+  const usdCents = await resolveUsdCents(proposed.amountMinor, proposed.currency)
+  await db.execute(sql`
+    INSERT INTO gym_prices (gym_id, kind, amount_minor, currency, usd_cents, source_kind, source_url, menu_posted_on)
+    VALUES (${gymId}, ${proposed.priceKind}, ${proposed.amountMinor}, ${proposed.currency},
+      ${usdCents}, ${proposed.sourceKind}, ${proposed.sourceUrl ?? null}, ${proposed.menuPostedOn ?? null})
+    ON CONFLICT (gym_id, kind, is_verified)
+    DO UPDATE SET amount_minor = EXCLUDED.amount_minor, currency = EXCLUDED.currency, usd_cents = EXCLUDED.usd_cents,
+      source_kind = EXCLUDED.source_kind, source_url = EXCLUDED.source_url, menu_posted_on = EXCLUDED.menu_posted_on, last_seen_at = now()
+  `)
+}
+
+// Creates one gym_changes row and queues its bot review - the one path
+// every change creator uses (a request's createRequest, and a
+// chat-found fact with no request at all), so every change gets
+// reviewed the same way regardless of where it came from
+// (STACK_AND_SCHEMA.md 2.10: "sweeps, chat facts and user submissions
+// all produce the same gym_changes, so one approval flow").
+export async function createGymChange(requestId: number | null, gymId: number | null, proposed: ProposedChange): Promise<number> {
+  const [change] = await db.insert(gymChanges).values({ requestId, gymId, proposed }).returning()
+  if (proposed.kind === "price" && gymId) await insertUnverifiedPrice(gymId, proposed)
+  await queue.add("bot-review", { changeId: change.id }, { jobId: `bot-review:${change.id}` })
+  return change.id
 }
 
 const FIELD_TO_COLUMN: Record<NonPriceField, string> = {
