@@ -54,6 +54,20 @@ export function convertToUsdCents(amount: number, currency: string, rates: Recor
   return Math.round((amount / rate) * 100)
 }
 
+// ISO 4217 minor-unit exponent, for a handful of zero-decimal currencies
+// this app's own region (SE Asia) actually sees - IDR above all
+// (confirmed against API.md's own `gym_prices` examples: a 150000
+// "amountMinor" IDR day pass converts to 950 usdCents, which only works
+// out ($9.50 for a day pass, 150000 IDR at a realistic rate) if 150000
+// IS the whole-Rupiah amount, not 150000 IDR-cents - IDR has no
+// subdivision used in practice). Every other currency this app handles
+// defaults to 2 (cents, satang, etc.) - the common case.
+const ZERO_DECIMAL_CURRENCIES = new Set(["IDR", "JPY", "KRW", "VND", "KHR", "LAK", "MMK"])
+
+export function amountMinorToMajor(amountMinor: number, currency: string): number {
+  return ZERO_DECIMAL_CURRENCIES.has(currency) ? amountMinor : amountMinor / 100
+}
+
 // Google Maps result-list links embed exact coordinates directly in the
 // href (e.g. "...!3d18.7992624!4d98.9883932...").
 export function extractLatLngFromMapsHref(href: string): { lat: number; lng: number } | null {

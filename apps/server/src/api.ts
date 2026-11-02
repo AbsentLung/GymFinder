@@ -11,6 +11,8 @@ import { pool } from "./db/index.js"
 import { queue } from "./queue/index.js"
 import { tilesRoutes } from "./routes/tiles.js"
 import { authRoutes } from "./routes/auth.js"
+import { requestsRoutes } from "./routes/requests.js"
+import { adminRoutes } from "./routes/admin.js"
 
 export async function buildApp() {
   const app = Fastify({ logger: true })
@@ -32,6 +34,8 @@ export async function buildApp() {
 
   await app.register(authRoutes)
   await app.register(tilesRoutes)
+  await app.register(requestsRoutes)
+  await app.register(adminRoutes)
 
   return app
 }

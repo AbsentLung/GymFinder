@@ -53,7 +53,19 @@ export const auth = betterAuth({
   // STACK_AND_SCHEMA.md 2.13 already decided bigint IDs for every table,
   // including `users`. modelName remaps the table to the one this app
   // already has.
-  user: { modelName: "users" },
+  user: {
+    modelName: "users",
+    // Without this, `role` is invisible to Better Auth's own API even
+    // though the column is right there on the mapped table - caught
+    // live (src/auth-guard.ts's requireAdmin): auth.api.getSession()
+    // only returns fields it's been told about via additionalFields,
+    // silently dropping any other column the underlying table happens
+    // to have. input: false - only PATCH /v1/admin/users/{id} (which
+    // writes the column directly, not through Better Auth's own APIs)
+    // is allowed to change it; nothing lets a user set their own role at
+    // sign-up.
+    additionalFields: { role: { type: "string", input: false, defaultValue: "user" } },
+  },
   // Global, not scoped to just "users" - Better Auth's own session/
   // account/verification tables FK against users.id, so if only users
   // got bigint ids, those FK columns would still come out as text

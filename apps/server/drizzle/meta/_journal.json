@@ -29,6 +29,13 @@
       "when": 1793636289877,
       "tag": "0003_solid_eternals",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793651614656,
+      "tag": "0004_premium_true_believers",
+      "breakpoints": true
     }
   ]
 }
