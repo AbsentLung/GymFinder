@@ -181,6 +181,16 @@ export const gyms = pgTable(
       (): SQL => sql`left(ST_GeoHash(${gyms.location}, 5), 4)`
     ),
     categories: text("categories").array().notNull().default(sql`'{}'::text[]`),
+    // Real columns, not inside `details` - caught live (building the
+    // tiles route): API.md's own response shapes show both as top-level
+    // fields on every tile/gym-details response (2.2, 2.3), and
+    // `description` specifically gets truncated to ~300 chars for tiles,
+    // which wants a plain column, not a jsonb extraction. Phase 4's
+    // migration script was missing these entirely before this fix - a
+    // real silent data-loss bug, not just a schema gap, since nothing
+    // downstream ever read gyms.address/description from the old data.
+    address: text("address"),
+    description: text("description"),
     acceptsDropIn: boolean("accepts_drop_in"),
     hasTrial: boolean("has_trial"),
     // Hybrid per STACK_AND_SCHEMA.md 2.7: opening hours (OSM

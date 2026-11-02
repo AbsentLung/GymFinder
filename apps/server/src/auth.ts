@@ -8,13 +8,8 @@
 // actually confirmed).
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
-import { drizzle } from "drizzle-orm/node-postgres"
 import bcrypt from "bcryptjs"
-import pg from "pg"
-import * as schema from "./db/schema.js"
-
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
-const db = drizzle(pool, { schema })
+import { db, schema } from "./db/index.js"
 
 export const auth = betterAuth({
   // Passing `schema` (confirmed against the current docs, not memory) is
