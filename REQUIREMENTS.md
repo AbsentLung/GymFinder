@@ -32,6 +32,12 @@ Each requirement has an ID so later docs (`DESIGN.md`, PRs, tests) can point at 
   - gym category (e.g. commercial, CrossFit, climbing, martial arts, yoga)
   - a text search over gym details
 
+### Sharing the map
+
+- **FR-28** The map's URL always describes what the user is looking at: map position and zoom, the open gym (if any), and the active filters. It updates as the user pans, zooms, opens or closes a gym, or changes a filter, without adding a browser history entry for every pan.
+- **FR-29** Opening a shared link shows the same view: same position and zoom, the same gym panel open, and the same filters applied. It works without an account.
+- **FR-30** On Android and iOS, a Share button sends the current view as a web link. Opening that link on a phone with the app installed opens it in the app; otherwise it opens on the web.
+
 ### Area sweeps by bot
 
 - **FR-11** Beyond free data sources, a user can request that a bot sweeps an area on Google Maps to find gyms that are missing from the map.

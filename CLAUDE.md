@@ -49,6 +49,12 @@ These were agreed with Joey. Follow them unless he changes them; update this fil
 - Keep the filters exactly as in the vibe-coded map (`GymFinderVibeCoded` branch): text search (name, description, address, categories), drop-ins only, trials only, category dropdown, all client-side on loaded tiles. No price filter.
 - Right sidebar day-pass list: cheapest first, unverified prices at the bottom.
 
+### Shareable map links (decided by Joey 2026-11-02, FR-28 to FR-30)
+- The map URL is the map's state: `/map?lat=&lng=&zoom=&gym=<id>&q=&dropin=1&trial=1&cat=a,b` (only set params that are in use). Opening that URL restores the same view, gym panel and filters, signed in or not.
+- On web, update it with `history.replaceState` as the view changes (the vibe-coded `ViewportUrlSync` already does this for lat/lng/zoom; extend it, don't drop it in the MapLibre switch). Opening or closing a gym may push a history entry so Back closes the panel.
+- On Android/iOS, a Share button shares the same web URL (React Native `Share`). Set up universal links (iOS) and app links (Android) through `app.json` so the link opens in the app when installed.
+- Parse and build these URLs in one shared helper so web, Share and deep links agree.
+
 ### Hosting
 - AWS (decided by Joey 2026-10-31; replaces the earlier Netlify + GCP e2-micro idea).
 - Demo mode stays near-free on a single small instance; scale mode moves to managed AWS services. Demo: Lightsail + Docker Compose, S3 + CloudFront + Route 53. Scale: ECS Fargate, RDS Postgres, ElastiCache, AWS CDK. See STACK_AND_SCHEMA.md.
