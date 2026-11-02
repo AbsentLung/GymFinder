@@ -23,6 +23,7 @@ import { gymChanges, requests } from "../db/schema.js"
 import { geohashToBounds } from "../lib.js"
 import { googleMapsSource } from "../sources/index.js"
 import { upsertGym } from "./gym-upsert.js"
+import { notifyRequestStatusChange } from "./push.js"
 import type { ProposedChange } from "./bot-review.js"
 
 export async function processSweep({ requestId, geohash5 }: { requestId: number; geohash5: string }): Promise<void> {
@@ -37,6 +38,7 @@ export async function processSweep({ requestId, geohash5 }: { requestId: number;
       VALUES (${geohash5}, 'google_maps', now(), 'failed')
       ON CONFLICT (geohash, source) DO UPDATE SET last_fetched_at = now(), status = 'failed'
     `)
+    await notifyRequestStatusChange(requestId)
     throw e
   }
 
@@ -79,4 +81,5 @@ export async function processSweep({ requestId, geohash5 }: { requestId: number;
     ON CONFLICT (geohash, source) DO UPDATE SET last_fetched_at = now(), status = 'ok', gyms_found = ${found.length}
   `)
   await db.update(requests).set({ status: "completed", result: { gymsFound: found.length, gymsNew } }).where(eq(requests.id, requestId))
+  await notifyRequestStatusChange(requestId)
 }

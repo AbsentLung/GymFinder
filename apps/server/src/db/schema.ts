@@ -274,10 +274,13 @@ export const requests = pgTable(
     // Signed-out users never create a request (FR-15: submitting or
     // requesting changes needs an account; browsing doesn't) - chats are
     // the one thing a signed-out user can trigger, and chats never
-    // become `requests` rows at all (API.md 1.4).
-    userId: bigint("user_id", { mode: "number" })
-      .notNull()
-      .references(() => users.id),
+    // become `requests` rows at all (API.md 1.4). Nullable (and
+    // onDelete: "set null", not the default RESTRICT/cascade) even
+    // though it's always set at creation - API.md 2.5: "Delete account
+    // ... Requests are kept but unlinked," so deleting a user has to
+    // leave this row behind with user_id cleared, not disappear it or
+    // block the deletion outright.
+    userId: bigint("user_id", { mode: "number" }).references(() => users.id, { onDelete: "set null" }),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("pending"),
     deadline: timestamp("deadline", { withTimezone: true }).notNull(),
@@ -340,6 +343,33 @@ export const tileFetches = pgTable(
   (table) => [uniqueIndex("tile_fetches_geohash_source_unique").on(table.geohash, table.source)]
 )
 
+// Never actually specified in STACK_AND_SCHEMA.md's schema section or ER
+// diagram - "needs push token storage" (STACK_AND_SCHEMA.md 1.8) was
+// noted as a requirement for Expo push notifications (API.md 2.5/2.7)
+// but the table itself was never designed. Added here, following this
+// file's own bigint/timestamp conventions, same as fx_rates below.
+// Unique on token alone (not per-user) - re-registering the same
+// physical device's token (e.g. a reinstall under the same account)
+// should move/update the existing row, not create a second one; DELETE
+// .../push-tokens/{token} (on sign-out) also only needs the token
+// itself to identify the row.
+export const pushTokens = pgTable(
+  "push_tokens",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    platform: text("platform").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("push_tokens_user_id_idx").on(table.userId),
+    check("push_tokens_platform_check", sql`${table.platform} IN ('ios', 'android', 'web')`),
+  ]
+)
+
 // A single-row cache, not a history table - "daily rates table" (API.md
 // 2.8) just means "shared across processes/workers", unlike the old
 // demo's in-memory fxCache (server/index.js) which each process would
@@ -362,7 +392,9 @@ export const reviews = pgTable(
     // STACK_AND_SCHEMA.md 2.14 - "Demo reviews come along with user_id
     // left empty"). The one-per-user-per-gym rule below only applies
     // once a review actually has a user attached.
-    userId: bigint("user_id", { mode: "number" }).references(() => users.id),
+    // onDelete: "cascade" - API.md 2.5: "Delete account ... reviews are
+    // removed" (unlike requests, which are kept but unlinked).
+    userId: bigint("user_id", { mode: "number" }).references(() => users.id, { onDelete: "cascade" }),
     rating: smallint("rating").notNull(),
     body: text("body"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

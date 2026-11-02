@@ -12,6 +12,7 @@ import { db } from "../db/index.js"
 import { gymChanges, requests } from "../db/schema.js"
 import { llm } from "../llm/index.js"
 import { queue } from "../queue/index.js"
+import { notifyRequestStatusChange } from "./push.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
 import { reverseGeocode } from "../geocode.js"
 import { getFxRates } from "../fx.js"
@@ -407,4 +408,5 @@ export async function recomputeRequestStatus(requestId: number): Promise<void> {
     {} as Record<"approved" | "rejected", number>
   )
   await db.update(requests).set({ status: "completed", result: counts }).where(eq(requests.id, requestId))
+  await notifyRequestStatusChange(requestId)
 }

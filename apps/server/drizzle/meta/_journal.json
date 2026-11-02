@@ -36,6 +36,13 @@
       "when": 1793651614656,
       "tag": "0004_premium_true_believers",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793655129950,
+      "tag": "0005_colossal_lockjaw",
+      "breakpoints": true
     }
   ]
 }
