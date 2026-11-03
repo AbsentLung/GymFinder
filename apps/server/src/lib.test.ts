@@ -305,6 +305,28 @@ describe("geohash5TilesCoveringBbox", () => {
     expect(tiles).toContain(encodeGeohash(bbox.maxLat, bbox.maxLng, 5))
     expect(tiles.length).toBeGreaterThanOrEqual(9) // at least the 3x3 grid of cells
   })
+
+  it("covers the whole top row, not just its corner (regression)", () => {
+    // The bug: a `for (lat = min; lat <= max; lat += step)` loop usually
+    // stops below `maxLat` (the step rarely divides the range evenly),
+    // so only the single (maxLat, maxLng) corner - added separately -
+    // ever got sampled on the top row. Every OTHER top-row tile across
+    // the longitude range was silently skipped.
+    const bounds = geohashToBounds("qw3yu")
+    const latSpan = bounds.maxLat - bounds.minLat
+    const lngSpan = bounds.maxLng - bounds.minLng
+    const bbox = {
+      minLat: bounds.minLat,
+      maxLat: bounds.minLat + latSpan * 2.3, // not an exact multiple of the step
+      minLng: bounds.minLng,
+      maxLng: bounds.minLng + lngSpan * 4.3,
+    }
+    const tiles = geohash5TilesCoveringBbox(bbox)
+    // A tile roughly mid-way along the top row's longitude range, well
+    // short of maxLng, that still sits in the top-most band of rows.
+    const midTopTile = encodeGeohash(bbox.maxLat, bbox.minLng + lngSpan * 2, 5)
+    expect(tiles).toContain(midTopTile)
+  })
 })
 
 describe("geohash5ChildrenOf", () => {
