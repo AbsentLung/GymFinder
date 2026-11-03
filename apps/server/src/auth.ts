@@ -3,6 +3,7 @@
 // writing into it - see src/db/schema.ts's comment. This file is the
 // actual auth wiring: routes are mounted in src/routes/auth.ts.
 import { betterAuth } from "better-auth"
+import { expo } from "@better-auth/expo"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import bcrypt from "bcryptjs"
 import { db, schema } from "./db/index.js"
@@ -15,6 +16,34 @@ export const auth = betterAuth({
   // the incoming URL against whatever basePath it's configured with,
   // not just "whatever Fastify happened to route to it").
   basePath: "/v1/auth",
+  // The Expo client (apps/mobile/src/auth-client.ts) stores the session
+  // cookie itself rather than relying on a browser's cookie jar (API.md
+  // 2.1: "a cookie on web and the Better Auth Expo client's stored
+  // token on mobile, with the same server code") - this plugin is what
+  // makes Better Auth recognize and correctly redirect/handle requests
+  // originating from the Expo app's own `travelapp://` scheme (and, in
+  // dev, Expo Go's `exp://` tunnel) instead of only ever expecting a
+  // real browser origin.
+  plugins: [expo()],
+  // NODE_ENV, not MODE - MODE=demo is a real, low-cost PRODUCTION tier
+  // (STACK_AND_SCHEMA.md 1.6: "demo mode, launch -> 10k DAU"), not "local
+  // dev." Trusting any exp:// origin (Expo Go's own dev tunnel scheme)
+  // in a real deployment, demo-mode or not, would let any Expo app -
+  // not just this one - complete the OAuth/session dance against this
+  // server. Gated on the actual environment instead, same check the
+  // official Expo integration's own example uses.
+  // config.webOrigin covers the web app - caught live: Better Auth
+  // validates a request's Origin header against this list on EVERY
+  // platform, not just native's travelapp:// scheme. A curl request
+  // with no Origin header at all (every earlier live auth test this
+  // project ran) never exercises this check, so the gap went unnoticed
+  // until testing with a real Origin header set, simulating an actual
+  // browser request, the way one always sends cross-origin.
+  trustedOrigins: [
+    "travelapp://",
+    config.webOrigin,
+    ...(process.env.NODE_ENV !== "production" ? ["exp://", "exp://**", "exp://192.168.*.*:*/**"] : []),
+  ],
   // Passing `schema` (confirmed against the current docs, not memory) is
   // what makes `generate` merge with the REAL `users` table (bigint id,
   // `role` column) instead of inventing its own idealized one from

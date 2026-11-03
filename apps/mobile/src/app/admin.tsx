@@ -53,7 +53,7 @@ export default function AdminScreen() {
     if (typeFilter) params.set('type', typeFilter);
     if (statusFilter) params.set('status', statusFilter);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/submissions?${params}`, { headers: authHeaders() });
+      const res = await fetch(`${API_BASE_URL}/api/admin/submissions?${params}`, { headers: await authHeaders(), credentials: 'include' });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? 'Failed to load submissions.');
@@ -76,7 +76,8 @@ export default function AdminScreen() {
     try {
       const res = await fetch(`${API_BASE_URL}/api/admin/submissions/${id}/${decision}`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers: await authHeaders(),
+        credentials: 'include',
       });
       if (!res.ok) {
         const data = await res.json();

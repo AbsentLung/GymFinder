@@ -27,6 +27,12 @@ export const config = {
   // name if unset, which is how this got added) - needed for correct
   // callback/redirect URLs, not just a label.
   betterAuthUrl: process.env.BETTER_AUTH_URL ?? `http://localhost:${Number(process.env.PORT ?? 3001)}`,
+  // The web app's own origin - Better Auth validates a request's Origin
+  // header against trustedOrigins (src/auth.ts) regardless of platform,
+  // not just the native app's travelapp:// scheme. 8081 is Expo's own
+  // default web dev port. In production this becomes the real
+  // CloudFront/domain origin (Phase 7).
+  webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:8081",
   // All optional - undefined in local dev (no real OAuth app yet).
   // Google and Facebook at launch per API.md 2.1; Apple is separate,
   // added before the iOS release since Apple requires it once other
