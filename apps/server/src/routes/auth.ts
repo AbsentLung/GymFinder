@@ -1,15 +1,9 @@
-// Mounts Better Auth at /v1/auth/* (API.md 2.1) - we don't write these
-// routes ourselves, just adapt Fastify's request/reply to the Fetch API
-// Request/Response Better Auth's handler expects (confirmed against
-// Better Auth's own Fastify integration guide, not memory).
+// Mounts Better Auth at /v1/auth/* - adapts Fastify's request/reply to
+// the Fetch API Request/Response its handler expects.
 //
-// Deliberately NOT using Better Auth's `toNodeHandler`/`reply.hijack()`
-// path: that hands the RAW Node request stream to Better Auth, but
-// Fastify has already consumed that stream into `request.body` by the
-// time any route handler runs - the raw stream would be empty/ended,
-// a classic double-body-parsing bug. Re-serializing Fastify's
-// already-parsed `request.body` into the new Request's body instead
-// means nothing ever reads the raw stream twice.
+// Not using `toNodeHandler`/`reply.hijack()`: that hands Better Auth the
+// raw Node stream, but Fastify already consumed it into `request.body` -
+// re-serializing that instead avoids reading the stream twice.
 import type { FastifyInstance } from "fastify"
 import { auth } from "../auth.js"
 
