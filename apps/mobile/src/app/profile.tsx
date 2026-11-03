@@ -30,6 +30,10 @@ export default function ProfileScreen() {
         <Text style={styles.subtitle}>{user.email}</Text>
         {user.isAdmin && <Text style={styles.adminBadge}>Admin</Text>}
 
+        <Pressable style={styles.linkButton} onPress={() => router.push('/my-requests')}>
+          <Text style={styles.linkButtonText}>My requests →</Text>
+        </Pressable>
+
         {user.isAdmin && (
           <Pressable style={styles.linkButton} onPress={() => router.push('/admin')}>
             <Text style={styles.linkButtonText}>Go to admin requests →</Text>
