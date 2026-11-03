@@ -18,16 +18,20 @@ import { WebView } from 'react-native-webview';
 import Supercluster from 'supercluster';
 
 import { API_BASE_URL } from '@/config';
+import { useAuth } from '@/auth-context';
+import { geohash4TilesCoveringBbox, geohash5TilesCoveringBbox } from '@/geohash';
 import {
   type Gym,
-  type FxRate,
+  type GymDetails,
+  type GymRequest,
   type NewGymLocation,
   GYM_CATEGORIES,
   UNKNOWN_CATEGORY,
-  formatCents,
+  formatPrice,
+  isPriceVerified,
   acceptsDropIn,
   gymMatchesSearch,
-  prefetchAreaCell,
+  pollRequest,
   TrialSection,
   ReviewsSection,
   ChatSection,
@@ -88,6 +92,7 @@ export default function MapScreen() {
     zoom?: string;
   }>();
   const router = useRouter();
+  const { user, authHeaders } = useAuth();
   // Applied directly to the panel's own top padding below, not relied on
   // via the outer SafeAreaView - confirmed live that an absolutely
   // positioned child (the panel) does NOT automatically inherit an
@@ -117,10 +122,31 @@ export default function MapScreen() {
   };
   const [webviewReady, setWebviewReady] = useState(false);
 
-  const [areaGyms, setAreaGyms] = useState<Gym[] | null>(null);
   const [allGyms, setAllGyms] = useState<Gym[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedGym, setSelectedGym] = useState<Gym | null>(null);
+  // Tile-level Gym data (week/month pass, trial details, full
+  // description) only arrives once a specific gym's panel opens - the
+  // map's tile shape is deliberately lightweight (API.md 2.2). The
+  // panel renders progressively: selectedGym's own fields immediately,
+  // then upgrades once selectedGymDetails resolves.
+  const [selectedGymDetails, setSelectedGymDetails] = useState<GymDetails | null>(null);
+  useEffect(() => {
+    setSelectedGymDetails(null);
+    if (!selectedGym) return;
+    fetch(`${API_BASE_URL}/v1/gyms/${selectedGym.id}`, { credentials: 'include' })
+      .then((r) => {
+        if (!r.ok) throw new Error(`Gym details failed: ${r.status}`);
+        return r.json();
+      })
+      .then(setSelectedGymDetails)
+      .catch((e) => console.error('Failed to load gym details', e));
+    // Keyed on the id only, same as the suggestingEdit-reset effect
+    // below - re-fetching full details should happen when the SELECTED
+    // GYM changes, not whenever the tile-level `selectedGym` object
+    // itself gets a new reference from a later mergeFreshGyms call.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGym?.id]);
   const [suggestingEdit, setSuggestingEdit] = useState(false);
   useEffect(() => setSuggestingEdit(false), [selectedGym?.id]);
   // "View on map" hides the panel without clearing selectedGym - the pin
@@ -144,46 +170,17 @@ export default function MapScreen() {
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const initialZoom = params.zoom ? parseFloat(params.zoom) : 12;
   const [zoom, setZoom] = useState(initialZoom);
-  const [mapBounds, setMapBounds] = useState<Bounds | null>(null);
-  const [fx, setFx] = useState<FxRate>({ currency: 'USD', rate: 1 });
-
-  const fetchFx = (lat: number, lng: number) => {
-    fetch(`${API_BASE_URL}/api/fx?lat=${lat}&lng=${lng}`)
-      .then((r) => r.json())
-      .then(setFx)
-      .catch((e) => console.error('Failed to load FX rate', e));
-  };
-
-  useEffect(() => {
-    fetchFx(parseFloat(params.lat), parseFloat(params.lng));
-  }, [params.lat, params.lng]);
-
-  useEffect(() => {
-    if (!mapBounds) return;
-    const centerLat = (mapBounds.north + mapBounds.south) / 2;
-    const centerLng = (mapBounds.east + mapBounds.west) / 2;
-    const id = setTimeout(() => fetchFx(centerLat, centerLng), 500);
-    return () => clearTimeout(id);
-  }, [mapBounds]);
+  // Seeded from the search/"near me" result's own bbox, not left null
+  // until the WebView's first viewportChanged roundtrip - that gap would
+  // otherwise delay the very first tile fetch for no reason.
+  const [mapBounds, setMapBounds] = useState<Bounds | null>({
+    north: parseFloat(params.maxLat),
+    south: parseFloat(params.minLat),
+    east: parseFloat(params.maxLng),
+    west: parseFloat(params.minLng),
+  });
 
   const center: [number, number] = [parseFloat(params.lat), parseFloat(params.lng)];
-
-  // Checked once per fresh arrival (keyed on the search/"near me" params,
-  // same as the fetchFx effect above) - deliberately NOT keyed on
-  // mapBounds, so panning around never re-triggers this. Only tells the
-  // user "no one's scanned here yet" the one time that's actually true:
-  // right when they land somewhere via search or geolocation.
-  const [showScanNudge, setShowScanNudge] = useState(false);
-  useEffect(() => {
-    setShowScanNudge(false);
-    fetch(
-      `${API_BASE_URL}/api/gyms/area-scanned?minLat=${params.minLat}&minLng=${params.minLng}` +
-        `&maxLat=${params.maxLat}&maxLng=${params.maxLng}`
-    )
-      .then((r) => r.json())
-      .then((data) => setShowScanNudge(!data.scanned))
-      .catch((e) => console.error('Area-scanned check failed', e));
-  }, [params.minLat, params.minLng, params.maxLat, params.maxLng]);
 
   const mergeFreshGyms = (fresh: Gym[]) => {
     setAllGyms((prev) => {
@@ -193,52 +190,117 @@ export default function MapScreen() {
     });
   };
 
-  // A counter, not a boolean - drag-prefetch and the committed pan-load
-  // can overlap (prefetching one spot while actually loading another),
-  // and a boolean would flicker false the instant either one resolves
-  // even with the other still in flight.
-  const [osmLoadingCount, setOsmLoadingCount] = useState(0);
-  const bumpOsmLoading = (delta: number) => setOsmLoadingCount((c) => Math.max(0, c + delta));
-  // Mobile's answer to the web map's mouse-hover prefetch - there's no
-  // hover on a touchscreen, so this fires off dragPrefetchPoint messages
-  // the WebView sends continuously while a drag is in progress (see
-  // leaflet-webview-html.ts's 'move' listener), using the same grid-cell
-  // dedup+fetch helper the web version uses.
-  const dragPrefetchedCells = useRef(new Set<string>());
+  // A counter, not a boolean - several tiles load in parallel, and a
+  // boolean would flicker false the instant any one of them resolves
+  // even with others still in flight.
+  const [tilesLoadingCount, setTilesLoadingCount] = useState(0);
+  const bumpTilesLoading = (delta: number) => setTilesLoadingCount((c) => Math.max(0, c + delta));
+  // Tiles already fetched this session, by geohash4 - avoids re-fetching
+  // the same tile on every minor pan jitter; sweeps below clear the
+  // relevant entries so a fresh sweep's results actually show up on the
+  // next load rather than being skipped as "already have this."
+  const fetchedTilesRef = useRef(new Set<string>());
+  const [showScanNudge, setShowScanNudge] = useState(false);
+  // Mirrors allGyms for loadTiles's own closure below, which is called
+  // from a useEffect keyed on [mapBounds, zoom] only (deliberately not
+  // on every allGyms change, which would re-run this effect on every
+  // single merge) - a ref keeps that intentional omission from also
+  // meaning a stale read inside the one check that needs the latest
+  // value.
+  const allGymsRef = useRef<Gym[] | null>(null);
+  allGymsRef.current = allGyms;
+
+  const loadTiles = () => {
+    if (!mapBounds || zoom < FILTERS_VISIBLE_AT_ZOOM) return;
+    const tiles = geohash4TilesCoveringBbox({ minLat: mapBounds.south, maxLat: mapBounds.north, minLng: mapBounds.west, maxLng: mapBounds.east });
+    const newTiles = tiles.filter((t) => !fetchedTilesRef.current.has(t));
+    if (newTiles.length === 0) return;
+    newTiles.forEach((t) => fetchedTilesRef.current.add(t));
+    bumpTilesLoading(newTiles.length);
+    setError(null);
+    Promise.all(
+      newTiles.map((tile) =>
+        fetch(`${API_BASE_URL}/v1/tiles/${tile}`)
+          .then((r) => {
+            if (!r.ok) throw new Error(`Tile fetch failed: ${r.status}`);
+            return r.json();
+          })
+          .then((data) => {
+            mergeFreshGyms(data.gyms);
+            // "No one has scanned this area for gyms yet" - a tile
+            // that's never been fetched at all (fetchedAt === null),
+            // not merely stale, is the same signal the old demo's
+            // separate /api/gyms/area-scanned check was for. No extra
+            // request needed now - it's already in this same response.
+            if (data.fetchedAt === null) setShowScanNudge(true);
+            return true;
+          })
+          .catch((e) => {
+            console.error('Failed to load tile', tile, e);
+            fetchedTilesRef.current.delete(tile); // let a retry actually retry
+            return false;
+          })
+          .finally(() => bumpTilesLoading(-1))
+      )
+    ).then((results) => {
+      if (allGymsRef.current === null && results.every((ok) => !ok)) {
+        setError("Couldn't load gyms for this area. Try again?");
+      }
+    });
+  };
+
+  useEffect(loadTiles, [mapBounds, zoom]);
 
   const [findingMore, setFindingMore] = useState(false);
   const [findMoreMessage, setFindMoreMessage] = useState<string | null>(null);
 
-  const findMoreGyms = () => {
+  const findMoreGyms = async () => {
     if (!mapBounds || findingMore) return;
+    if (!user) {
+      setFindMoreMessage('Sign in to search for more gyms.');
+      return;
+    }
     // Clicking IS the thing the nudge was asking for - dismiss
     // immediately rather than waiting on the request to resolve.
     setShowScanNudge(false);
     setFindingMore(true);
     setFindMoreMessage(null);
-    fetch(`${API_BASE_URL}/api/gyms/find-more`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ minLat: mapBounds.south, minLng: mapBounds.west, maxLat: mapBounds.north, maxLng: mapBounds.east }),
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`Request failed: ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        if (data.scrapeFailed) {
-          setFindMoreMessage("Couldn't reach Google Maps - try again?");
-          return;
-        }
-        mergeFreshGyms([...data.newGyms, ...(data.updatedGyms ?? [])]);
-        const researchNote = data.researchAttempted > 0 ? `, researched ${data.researchAttempted} of them` : '';
-        setFindMoreMessage(data.newGyms.length > 0 ? `Found ${data.newGyms.length} new gym(s)${researchNote}.` : 'No new gyms found here.');
-      })
-      .catch((e) => {
-        console.error('Find more gyms failed', e);
+    try {
+      const cells = geohash5TilesCoveringBbox({ minLat: mapBounds.south, maxLat: mapBounds.north, minLng: mapBounds.west, maxLng: mapBounds.east });
+      const settled = await Promise.all(
+        cells.map(async (geohash) =>
+          fetch(`${API_BASE_URL}/v1/sweeps`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+            credentials: 'include',
+            body: JSON.stringify({ geohash }),
+          })
+            .then((r) => {
+              if (!r.ok) throw new Error(`Sweep failed: ${r.status}`);
+              return r.json();
+            })
+            .then((created: GymRequest) => pollRequest(created.id, authHeaders))
+            .catch((e) => {
+              console.error('Sweep failed for a cell', e);
+              return null;
+            })
+        )
+      );
+      const completed = settled.filter((r): r is GymRequest => r != null);
+      const totalNew = completed.reduce((sum, r) => sum + ((r.result as { gymsNew?: number } | null)?.gymsNew ?? 0), 0);
+      if (completed.length === 0) {
         setFindMoreMessage('Something went wrong - try again?');
-      })
-      .finally(() => setFindingMore(false));
+      } else {
+        setFindMoreMessage(totalNew > 0 ? `Found ${totalNew} new gym(s).` : 'No new gyms found here.');
+        // Each geohash5 cell's own tile4 may now have fresher data than
+        // what's cached - clear just those before reloading, not every
+        // tile on screen.
+        cells.forEach((cell) => fetchedTilesRef.current.delete(cell.slice(0, 4)));
+        loadTiles();
+      }
+    } finally {
+      setFindingMore(false);
+    }
   };
 
   // Blinking "Find more gyms" while the nudge is showing - looped
@@ -256,47 +318,14 @@ export default function MapScreen() {
     return () => loop.stop();
   }, [showScanNudge, nudgeBlink]);
 
-  const loadGyms = () => {
-    const url = `${API_BASE_URL}/api/gyms/by-area?minLat=${params.minLat}&minLng=${params.minLng}&maxLat=${params.maxLat}&maxLng=${params.maxLng}`;
-    bumpOsmLoading(1);
-    fetch(url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`Request failed: ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        if (data.refreshFailed && data.gyms.length === 0) {
-          setError("Couldn't reach OpenStreetMap to look up this area. Try again?");
-          return;
-        }
-        setAreaGyms(data.gyms);
-        mergeFreshGyms(data.gyms);
-      })
-      .catch((e) => {
-        console.error('Failed to load area gyms', e);
-        setError("Couldn't load gyms for this area. Try again?");
-      })
-      .finally(() => bumpOsmLoading(-1));
-  };
-
-  const loadAllGyms = () => {
-    fetch(`${API_BASE_URL}/api/gyms/all`)
-      .then((r) => r.json())
-      .then((data) => mergeFreshGyms(data.gyms))
-      .catch((e) => console.error('Failed to load world gym list', e));
-  };
-
-  useEffect(loadGyms, [params.minLat, params.minLng, params.maxLat, params.maxLng]);
-  useEffect(loadAllGyms, []);
-
-  const mapGyms = allGyms ?? areaGyms ?? [];
+  const mapGyms = allGyms ?? [];
   const hasUnknownCategoryGyms = mapGyms.some((g) => g.categories.length === 0);
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const visibleGyms = mapGyms
     .filter((g) => gymMatchesSearch(g, normalizedSearch))
     .filter((g) => !dropInOnly || acceptsDropIn(g))
-    .filter((g) => !trialOnly || (g.trial_days != null && g.trial_days > 0))
+    .filter((g) => !trialOnly || g.hasTrial === true)
     .filter(
       (g) =>
         selectedCategories.size === 0 ||
@@ -305,10 +334,12 @@ export default function MapScreen() {
     );
 
   const inViewGyms = mapBounds ? visibleGyms.filter((g) => boundsContains(mapBounds, g.lat, g.lng)) : visibleGyms;
-  const confirmedPriceGyms = [...inViewGyms].filter((g) => g.day_pass_price_cents != null).sort((a, b) => a.day_pass_price_cents! - b.day_pass_price_cents!);
+  const confirmedPriceGyms = [...inViewGyms]
+    .filter((g) => g.dayPass != null && g.dayPass.verified)
+    .sort((a, b) => a.dayPass!.usdCents - b.dayPass!.usdCents);
   const suggestedPriceGyms = [...inViewGyms]
-    .filter((g) => g.day_pass_price_cents == null && g.suggested_day_pass_price_cents != null)
-    .sort((a, b) => a.suggested_day_pass_price_cents! - b.suggested_day_pass_price_cents!);
+    .filter((g) => g.dayPass != null && !g.dayPass.verified)
+    .sort((a, b) => a.dayPass!.usdCents - b.dayPass!.usdCents);
 
   // Below the same zoom the filter chips use as their own cutoff, pins
   // disappear entirely rather than growing into aggregate bubbles - same
@@ -340,7 +371,7 @@ export default function MapScreen() {
         radius: 8,
         color: gym.id === selectedGym?.id ? '#146C5F' : '#3FA393',
         isCluster: false,
-        tooltip: `${gym.name}${gym.rating ? ` · ⭐ ${gym.rating}` : ''}`,
+        tooltip: `${gym.name}${gym.rating ? ` · ⭐ ${gym.rating.toFixed(1)}` : ''}`,
       };
     }).filter((m): m is NonNullable<typeof m> => m != null);
   }, [clusterIndex, gymsById, mapBounds, zoom, selectedGym?.id]);
@@ -396,9 +427,13 @@ export default function MapScreen() {
     } else if (msg.type === 'viewportChanged') {
       setZoom(msg.zoom);
       setMapBounds(msg.bounds);
-    } else if (msg.type === 'dragPrefetchPoint') {
-      prefetchAreaCell(msg.lat, msg.lng, dragPrefetchedCells.current, bumpOsmLoading);
     }
+    // dragPrefetchPoint messages are still sent by the WebView (leaflet-
+    // webview-html.ts) but no longer handled - the old OSM-prefetch
+    // mechanism this fed doesn't apply anymore. The new tiles endpoint
+    // answers instantly from cache and only enqueues a background
+    // refresh when stale, so there's no more per-area scrape latency to
+    // hide ahead of time.
   };
 
   const startAddingGym = () => {
@@ -467,9 +502,9 @@ export default function MapScreen() {
           <Text style={styles.backButtonText}>← Search again</Text>
         </Pressable>
 
-        {osmLoadingCount > 0 && (
+        {tilesLoadingCount > 0 && (
           <View style={styles.osmLoadingNote} pointerEvents="none">
-            <Text style={styles.osmLoadingNoteText}>Finding gyms on OSM…</Text>
+            <Text style={styles.osmLoadingNoteText}>Loading gyms…</Text>
           </View>
         )}
 
@@ -624,9 +659,7 @@ export default function MapScreen() {
         {(findingMore || findMoreMessage) && (
           <View style={styles.findMoreMessage}>
             <Text style={styles.findMoreMessageText}>
-              {findingMore
-                ? 'Our bot has to pretend to be human while it scrapes the internet - this might take a while.'
-                : findMoreMessage}
+              {findingMore ? 'Searching Google Maps for gyms in this area - this might take a minute.' : findMoreMessage}
             </Text>
           </View>
         )}
@@ -639,7 +672,7 @@ export default function MapScreen() {
           </View>
         )}
 
-        {areaGyms === null && !error && (
+        {allGyms === null && !error && (
           <View style={styles.overlay}>
             <ActivityIndicator size="large" color="#146C5F" />
             <Text style={styles.overlayTitle}>Finding gyms in {params.name}…</Text>
@@ -653,8 +686,8 @@ export default function MapScreen() {
               style={styles.retryButton}
               onPress={() => {
                 setError(null);
-                setAreaGyms(null);
-                loadGyms();
+                fetchedTilesRef.current.clear();
+                loadTiles();
               }}
             >
               <Text style={styles.retryButtonText}>Try again</Text>
@@ -668,7 +701,7 @@ export default function MapScreen() {
           <View style={[styles.panelHeader, { paddingTop: insets.top + 16 }]}>
             <Text style={styles.panelTitle}>{selectedGym.name}</Text>
             <View style={styles.panelHeaderActions}>
-              {!suggestingEdit && (
+              {!suggestingEdit && selectedGymDetails && (
                 <Pressable onPress={() => setSuggestingEdit(true)}>
                   <Text style={styles.suggestEditLink}>Suggest an edit</Text>
                 </Pressable>
@@ -678,9 +711,9 @@ export default function MapScreen() {
               </Pressable>
             </View>
           </View>
-          {suggestingEdit ? (
+          {suggestingEdit && selectedGymDetails ? (
             <SuggestEditForm
-              gym={selectedGym}
+              gym={selectedGymDetails}
               onDone={(updatedGym) => {
                 if (updatedGym) {
                   setSelectedGym(updatedGym);
@@ -694,7 +727,7 @@ export default function MapScreen() {
               {selectedGym.rating && (
                 <View style={panelStyles.panelRow}>
                   <Text style={panelStyles.panelLabel}>Rating</Text>
-                  <Text style={panelStyles.panelValue}>⭐ {selectedGym.rating}</Text>
+                  <Text style={panelStyles.panelValue}>⭐ {selectedGym.rating.toFixed(1)}</Text>
                 </View>
               )}
               {selectedGym.categories.length > 0 && (
@@ -703,10 +736,10 @@ export default function MapScreen() {
                   <Text style={panelStyles.panelValue}>{selectedGym.categories.join(', ')}</Text>
                 </View>
               )}
-              {selectedGym.description && (
+              {(selectedGymDetails?.description ?? selectedGym.description) && (
                 <View style={panelStyles.panelRow}>
                   <Text style={panelStyles.panelLabel}>Description</Text>
-                  <Text style={panelStyles.panelValue}>{selectedGym.description}</Text>
+                  <Text style={panelStyles.panelValue}>{selectedGymDetails?.description ?? selectedGym.description}</Text>
                 </View>
               )}
               {selectedGym.address && (
@@ -715,29 +748,31 @@ export default function MapScreen() {
                   <Text style={panelStyles.panelValue}>{selectedGym.address}</Text>
                 </View>
               )}
-              {acceptsDropIn(selectedGym) && (
+              {acceptsDropIn(selectedGymDetails ?? selectedGym) && (
                 <View style={panelStyles.panelRow}>
                   <Text style={panelStyles.panelLabel}>Drop-ins</Text>
                   <Text style={panelStyles.panelValue}>Yes</Text>
                 </View>
               )}
-              <TrialSection key={`trial-${selectedGym.id}`} gym={selectedGym} />
-              {(formatCents(selectedGym.day_pass_price_cents, fx) ||
-                formatCents(selectedGym.week_pass_price_cents, fx) ||
-                formatCents(selectedGym.month_pass_price_cents, fx)) && (
-                <View style={panelStyles.panelRow}>
-                  <Text style={panelStyles.panelLabel}>Pricing</Text>
-                  {formatCents(selectedGym.day_pass_price_cents, fx) && (
-                    <Text style={panelStyles.panelValue}>Day pass: {formatCents(selectedGym.day_pass_price_cents, fx)}</Text>
-                  )}
-                  {formatCents(selectedGym.week_pass_price_cents, fx) && (
-                    <Text style={panelStyles.panelValue}>Week pass: {formatCents(selectedGym.week_pass_price_cents, fx)}</Text>
-                  )}
-                  {formatCents(selectedGym.month_pass_price_cents, fx) && (
-                    <Text style={panelStyles.panelValue}>Month pass: {formatCents(selectedGym.month_pass_price_cents, fx)}</Text>
-                  )}
-                </View>
+              {selectedGymDetails ? (
+                <TrialSection key={`trial-${selectedGymDetails.id}`} gym={selectedGymDetails} />
+              ) : (
+                <ActivityIndicator size="small" color="#146C5F" />
               )}
+              {(() => {
+                const dayPass = selectedGymDetails?.prices.find((p) => p.kind === 'day_pass') ?? selectedGym.dayPass;
+                const weekPass = selectedGymDetails?.prices.find((p) => p.kind === 'week_pass');
+                const monthPass = selectedGymDetails?.prices.find((p) => p.kind === 'month_pass');
+                if (!dayPass && !weekPass && !monthPass) return null;
+                return (
+                  <View style={panelStyles.panelRow}>
+                    <Text style={panelStyles.panelLabel}>Pricing</Text>
+                    {dayPass && <Text style={panelStyles.panelValue}>Day pass: {formatPrice(dayPass)}{!isPriceVerified(dayPass) && ' (unverified)'}</Text>}
+                    {weekPass && <Text style={panelStyles.panelValue}>Week pass: {formatPrice(weekPass)}{!isPriceVerified(weekPass) && ' (unverified)'}</Text>}
+                    {monthPass && <Text style={panelStyles.panelValue}>Month pass: {formatPrice(monthPass)}{!isPriceVerified(monthPass) && ' (unverified)'}</Text>}
+                  </View>
+                );
+              })()}
               <View style={panelStyles.panelRow}>
                 <Text style={panelStyles.panelLabel}>Coordinates</Text>
                 <Text style={panelStyles.panelValue}>
@@ -756,14 +791,7 @@ export default function MapScreen() {
                 </Pressable>
               </View>
               <ReviewsSection key={`reviews-${selectedGym.id}`} gym={selectedGym} />
-              <ChatSection
-                key={`chat-${selectedGym.id}`}
-                gym={selectedGym}
-                onGymUpdated={(updatedGym) => {
-                  setSelectedGym(updatedGym);
-                  mergeFreshGyms([updatedGym]);
-                }}
-              />
+              <ChatSection key={`chat-${selectedGym.id}`} gym={selectedGym} />
             </ScrollView>
           )}
         </KeyboardAvoidingView>
@@ -784,7 +812,7 @@ export default function MapScreen() {
                 {confirmedPriceGyms.map((gym) => (
                   <Pressable key={gym.id} style={styles.priceRow} onPress={() => setSelectedGym(gym)}>
                     <Text style={styles.priceRowName}>{gym.name}</Text>
-                    <Text style={styles.priceRowPrice}>{formatCents(gym.day_pass_price_cents, fx)}</Text>
+                    <Text style={styles.priceRowPrice}>{formatPrice(gym.dayPass)}</Text>
                   </Pressable>
                 ))}
                 {suggestedPriceGyms.length > 0 && (
@@ -795,7 +823,7 @@ export default function MapScreen() {
                 {suggestedPriceGyms.map((gym) => (
                   <Pressable key={gym.id} style={styles.priceRow} onPress={() => setSelectedGym(gym)}>
                     <Text style={styles.priceRowName}>{gym.name}</Text>
-                    <Text style={styles.priceRowPriceSuggested}>~{formatCents(gym.suggested_day_pass_price_cents, fx)}</Text>
+                    <Text style={styles.priceRowPriceSuggested}>~{formatPrice(gym.dayPass)}</Text>
                   </Pressable>
                 ))}
               </>
@@ -931,7 +959,7 @@ const styles = StyleSheet.create({
   addGymButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
   findMoreMessage: { position: 'absolute', top: 56, right: 16, maxWidth: 220, backgroundColor: 'white', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, ...shadow(3), zIndex: 999 },
   findMoreMessageText: { fontSize: 12, color: '#1C2430' },
-  // Bottom-left, deliberately quiet - this can fire a lot while dragging
+  // Bottom-left, deliberately quiet - this can fire a lot while panning
   // the map around, so it's a small ambient note, not an attention-
   // grabbing one like the scan nudge above.
   osmLoadingNote: {
