@@ -1,13 +1,8 @@
-// Phase 4: one-off migration from the vibe-coded demo database
-// (apps/server/db/schema.sql, read via OLD_DATABASE_URL) into the real
-// schema (apps/server/src/db/schema.ts, written via DATABASE_URL), per
-// STACK_AND_SCHEMA.md 2.14. Read-only against the old database - never
-// writes, drops or truncates anything there.
+// One-off migration from the vibe-coded demo DB (OLD_DATABASE_URL) into
+// the real schema (DATABASE_URL). Read-only against the old DB.
 //
-// Idempotent: every insert is keyed on a natural or constructed unique
-// key so re-running after a successful migration updates in place
-// rather than duplicating. Runs the whole thing inside one transaction
-// (rolled back on any error, so a failed run leaves nothing partial).
+// Idempotent: every insert is keyed on a natural/constructed unique key,
+// so a re-run updates in place. Whole thing runs in one transaction.
 //
 // Usage:
 //   OLD_DATABASE_URL=postgres://localhost:5432/travelapp \
@@ -24,12 +19,9 @@ type Report = {
   entity: string
   oldCount: number
   newCount: number
-  // Actually dropped - no row created at all.
+  // Dropped - no row created.
   skipped: { oldId: unknown; reason: string }[]
-  // Migrated successfully, but with a caveat worth surfacing (e.g. a
-  // review that migrated with no linked user). Counted in newCount,
-  // NOT in skipped - keeping them separate so the report never implies
-  // data was dropped when it wasn't.
+  // Migrated OK, but with a caveat worth surfacing. Not in `skipped`.
   notes: { oldId: unknown; note: string }[]
 }
 const reports: Report[] = []
@@ -45,16 +37,14 @@ async function migrate() {
   try {
     await client.query("BEGIN")
 
-    // --- categories (just for the id->label lookup used below; the new
-    // schema doesn't have a `categories` table of its own, text[] per
-    // STACK_AND_SCHEMA.md 2.8) -------------------------------------
+    // id->label lookup for categories[] below - the new schema has no
+    // standalone categories table.
     const { rows: oldCategories } = await oldPool.query("SELECT id, label FROM categories")
     const categoryLabelById = new Map<number, string>(oldCategories.map((c) => [c.id, c.label]))
 
     // --- users -------------------------------------------------------
-    // password_hash is bcrypt, same scheme auth.ts's emailAndPassword
-    // config verifies (confirmed live, not assumed) - carried over as-is
-    // so existing accounts keep their password with no reset needed.
+    // password_hash is bcrypt, same scheme auth.ts verifies - carried
+    // over as-is, no reset needed.
     const usersRpt = report("users")
     const { rows: oldUsers } = await oldPool.query(
       "SELECT id, email, name, password_hash, auth_provider, is_admin FROM users ORDER BY id"
@@ -63,12 +53,8 @@ async function migrate() {
     const oldUserIdToNewId = new Map<number, number>()
     for (const u of oldUsers) {
       if (u.auth_provider !== "email" || !u.password_hash) {
-        // Nothing in the real dataset hits this (all 4 demo users are
-        // auth_provider='email' with a hash), but the demo's signup form
-        // did accept 'google'/'facebook' as a stubbed no-op provider -
-        // there's no real OAuth token to carry over for those, so they'd
-        // need a password reset instead of a migrated hash. Flagged
-        // rather than silently guessed at.
+        // A stubbed google/facebook signup has no real OAuth token to
+        // carry over - needs a password reset instead.
         usersRpt.skipped.push({ oldId: u.id, reason: `auth_provider=${u.auth_provider}, no bcrypt hash to carry over` })
         continue
       }
@@ -91,13 +77,9 @@ async function migrate() {
     }
 
     // --- gyms + gym_source_refs + gym_prices + categories[] ----------
-    // Idempotency for gyms: gym_source_refs is the natural home for
-    // this (STACK_AND_SCHEMA.md 2.11) - OSM-sourced gyms key on their
-    // real osm_id (useful for every future Overpass sync too, not just
-    // this migration); gyms with no osm_id (bot_verified/admin_verified)
-    // get a synthetic `demo_gym` source ref keyed on the old numeric id,
-    // purely so a second run of this script recognizes them and updates
-    // in place instead of inserting a duplicate.
+    // Idempotency via gym_source_refs: OSM-sourced gyms key on their
+    // real osm_id; others get a synthetic `demo_gym` ref keyed on the
+    // old numeric id, so a re-run updates in place.
     const gymsRpt = report("gyms")
     const { rows: oldGyms } = await oldPool.query("SELECT * FROM gyms ORDER BY id")
     gymsRpt.oldCount = oldGyms.length
@@ -112,11 +94,8 @@ async function migrate() {
         [source, externalId]
       )
 
-      // details jsonb: the old `rating` column is a Google Maps scraped
-      // rating, a different thing from the app's own review average
-      // (which API.md computes from `reviews` at read time, and isn't a
-      // stored gyms column at all in this schema) - kept here, not
-      // dropped, under its own key so the two never get confused.
+      // `rating` is a scraped Google rating, distinct from the app's own
+      // review average - kept under its own key so they don't get confused.
       const details: Record<string, unknown> = {}
       if (g.rating != null) details.externalRating = Number(g.rating)
       if (g.trial_details) details.trialDetails = g.trial_details
@@ -150,14 +129,8 @@ async function migrate() {
       oldGymIdToNewId.set(g.id, gymId)
       gymsRpt.newCount++
 
-      // Confirmed prices on the old `gyms` row -> verified gym_prices
-      // (STACK_AND_SCHEMA.md 2.14: "the vibe-coded app shows them as
-      // confirmed"). usd_cents: these were already stored in USD cents
-      // in the old schema (the demo's canonical currency), so
-      // amount_minor/currency/usd_cents are all the same number here -
-      // a real FX-converted amountMinor only applies to genuinely
-      // non-USD prices, which this migration doesn't have (the chatbot's
-      // local-currency display was computed at read time, never stored).
+      // Confirmed prices on the old row -> verified gym_prices. Already
+      // stored in USD cents, so amount_minor/usd_cents are the same number.
       const priceKinds: [string, number | null][] = [
         ["day_pass", g.day_pass_price_cents],
         ["week_pass", g.week_pass_price_cents],
@@ -174,7 +147,7 @@ async function migrate() {
         )
       }
 
-      // categories[] (gym_categories join -> text[], STACK_AND_SCHEMA.md 2.8)
+      // categories[] (gym_categories join -> text[])
       const { rows: catRows } = await oldPool.query("SELECT category_id FROM gym_categories WHERE gym_id = $1", [g.id])
       const labels = catRows.map((r) => categoryLabelById.get(r.category_id)).filter((l): l is string => !!l)
       if (labels.length > 0) {
@@ -215,12 +188,9 @@ async function migrate() {
     }
 
     // --- reviews -------------------------------------------------------
-    // No natural unique key in the old table (just a free-text `author`,
-    // no user_id at all) - (gym_id, rating, created_at) stands in as a
-    // practical dedup key for this one-time, low-volume migration.
-    // "Linked where possible" (the brief's own words) means an exact
-    // (case-sensitive) match against a migrated user's name; anything
-    // else stays unlinked, same as the old app's anonymous reviews were.
+    // No natural unique key (free-text `author`, no user_id) - (gym_id,
+    // rating, created_at) is a practical dedup key here. Linked to a
+    // user only on an exact name match; else stays unlinked.
     const reviewsRpt = report("reviews")
     const { rows: oldReviews } = await oldPool.query("SELECT * FROM reviews ORDER BY id")
     reviewsRpt.oldCount = oldReviews.length
@@ -244,21 +214,15 @@ async function migrate() {
       )
       reviewsRpt.newCount++
       if (!matchedUserId) {
-        reviewsRpt.notes.push({ oldId: r.id, note: `migrated, but author "${r.author}" has no matching user - left unlinked (user_id null), same as the old app's anonymous reviews` })
+        reviewsRpt.notes.push({ oldId: r.id, note: `migrated, but author "${r.author}" has no matching user - left unlinked` })
       }
     }
 
     // --- gym_submissions -> requests + gym_changes --------------------
-    // 'admin_request' submissions are dropped on purpose: "apply to be
-    // admin" is explicitly removed (CLAUDE.md, API.md decision #8) -
-    // nothing in the new schema represents that submission kind, and
-    // keeping the rows around with nowhere to render them would just be
-    // dead data. Everything else (new_gym, edit) becomes a request +
-    // gym_changes pair, or a bare gym_changes row when the old row has
-    // no submitting user (requests.user_id is NOT NULL per FR-15 - only
-    // signed-in users can submit/request, but gym_changes itself allows
-    // a null request_id for exactly this kind of orphaned-provenance
-    // case, same as a chat-found fact with no request behind it).
+    // 'admin_request' is dropped - "apply to be admin" no longer exists.
+    // Everything else becomes a request + gym_changes pair, or a bare
+    // gym_changes row when the old submission has no user (requests.user_id
+    // is NOT NULL per FR-15, but gym_changes allows a null request_id).
     const STATUS_TO_REVIEW: Record<number, string> = {
       1: "pending_bot",
       2: "awaiting_admin",
@@ -285,8 +249,7 @@ async function migrate() {
 
       const kind = s.submission_type === "new_gym" ? "add_gym" : "update_gym"
       const reviewStatus = STATUS_TO_REVIEW[s.status_id] ?? "awaiting_admin"
-      // approved_by = 0 is the seed data's bot sentinel admin row (see
-      // apps/server/db/seed.sql) - a real admin id means a human decided.
+      // approved_by = 0 is the seed data's bot sentinel; a real id = a human.
       const decidedBy = s.approved_by == null ? null : s.approved_by === 0 ? "bot" : "admin"
       const newUserId = s.submitted_by_user_id ? oldUserIdToNewId.get(s.submitted_by_user_id) : null
       const gymId = s.gym_id ? oldGymIdToNewId.get(s.gym_id) : null
@@ -310,7 +273,7 @@ async function migrate() {
       } else {
         requestsRpt.notes.push({
           oldId: s.id,
-          note: "migrated to gym_changes, but no `requests` row - requests.user_id is required (FR-15) and this old submission has no submitted_by_user_id",
+          note: "migrated to gym_changes, but no `requests` row - no submitted_by_user_id to satisfy requests.user_id (FR-15)",
         })
       }
 
@@ -331,13 +294,9 @@ async function migrate() {
     }
 
     // --- fetched_areas / scanned_areas -> tile_fetches ------------------
-    // No geohash concept existed in the old bbox-based tables, so this
-    // can't be a precise per-cell translation - each old bounding box
-    // becomes one tile_fetches row keyed on a synthetic geohash built
-    // from its own min corner, which is only meant to carry the
-    // "this area was fetched/scanned at this time" fact forward for
-    // audit purposes. Real geohash4/5 coverage starts fresh from Phase 5
-    // onward (every live Overpass/sweep call writes real cells).
+    // No geohash concept in the old bbox tables - each bbox becomes one
+    // row keyed on a synthetic geohash, just to carry the audit fact
+    // forward. Real geohash4/5 coverage starts fresh from Phase 5 on.
     const tileFetchesRpt = report("fetched_areas/scanned_areas -> tile_fetches")
     const { rows: oldFetchedAreas } = await oldPool.query("SELECT * FROM fetched_areas")
     const { rows: oldScannedAreas } = await oldPool.query("SELECT * FROM scanned_areas")
