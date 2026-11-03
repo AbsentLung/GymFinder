@@ -1,16 +1,8 @@
-// Gym Finder's real schema, per STACK_AND_SCHEMA.md part 2 (PR #6/#9's
-// decisions). The old apps/server/db/*.sql and apps/server/server/*.js
-// are the vibe-coded demo kept as REFERENCE ONLY (per the restructure
-// plan) - this file is the actual schema going forward, migrated via
-// drizzle-kit (see drizzle.config.ts). The one-off migration script in
-// Phase 4 reads the old schema and writes into tables defined here.
+// Real schema per STACK_AND_SCHEMA.md part 2. The old apps/server/db/*.sql
+// is the vibe-coded demo, kept as reference only.
 //
-// Better Auth will add its own `session`, `account` and `verification`
-// tables alongside `users` in Phase 5 (and likely a few more columns on
-// `users` itself, e.g. emailVerified/name/image) - STACK_AND_SCHEMA.md
-// 2.2 says as much ("they're not shown" in its ER diagram). Not added
-// here since Phase 3 is schema-only and Better Auth's own CLI generates
-// that part when auth is actually wired up.
+// Better Auth adds its own session/account/verification tables in Phase 5
+// - not added here since Phase 3 is schema-only.
 
 import { sql, type SQL } from "drizzle-orm"
 import {
@@ -30,19 +22,9 @@ import {
   check,
 } from "drizzle-orm/pg-core"
 
-// --- PostGIS geometry(Point, 4326) -----------------------------------
-// Drizzle's pg-core has no built-in PostGIS type (confirmed against the
-// current docs, not memory, per AGENTS.md's instruction) - this is the
-// documented customType escape hatch. toDriver writes via ST_MakePoint
-// (always produces a valid point, no WKT-parsing risk on the way in).
-// fromDriver is intentionally a pass-through: node-postgres returns
-// geometry columns as hex-encoded EWKB over the wire, not the {lat,lng}
-// shape this type claims, unless the query explicitly selects
-// ST_X(location)/ST_Y(location) (or ST_AsGeoJSON) instead of the raw
-// column. No application code queries this yet (that's Phase 5), so
-// there's nothing depending on automatic deserialization working today
-// - flagged here rather than shipping a parser for a shape nothing
-// reads yet.
+// Drizzle has no built-in PostGIS type - customType escape hatch.
+// fromDriver is a pass-through: reads come back as raw EWKB hex, not
+// {lat,lng}, unless the query selects ST_X/ST_Y explicitly.
 const point = customType<{ data: { lat: number; lng: number }; driverData: string }>({
   dataType() {
     return "geometry(Point, 4326)"
@@ -71,10 +53,8 @@ export const gyms = pgTable(
     id: bigserial("id", { mode: "number" }).primaryKey(),
     name: text("name").notNull(),
     location: point("location").notNull(),
-    // Generated from `location` directly, not from each other - Postgres
-    // (and Drizzle) generated columns can't reference another generated
-    // column, so geohash4 re-states "the first 4 chars of the geohash5
-    // expression" rather than reading the geohash5 column.
+    // Both generated from `location` directly - a generated column can't
+    // reference another generated column.
     geohash5: text("geohash5").generatedAlwaysAs(
       (): SQL => sql`ST_GeoHash(${gyms.location}, 5)`
     ),
@@ -84,8 +64,7 @@ export const gyms = pgTable(
     categories: text("categories").array().notNull().default(sql`'{}'::text[]`),
     acceptsDropIn: boolean("accepts_drop_in"),
     hasTrial: boolean("has_trial"),
-    // Hybrid per STACK_AND_SCHEMA.md 2.7: opening hours (OSM
-    // `opening_hours` format), amenities, website, trial details, etc.
+    // Opening hours, amenities, website, trial details, etc.
     details: jsonb("details"),
     status: text("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -96,10 +75,6 @@ export const gyms = pgTable(
     index("gyms_geohash4_idx").on(table.geohash4),
     index("gyms_geohash5_idx").on(table.geohash5),
     index("gyms_categories_gin").using("gin", table.categories),
-    // pg_trgm similarity on name, for dedup (STACK_AND_SCHEMA.md 2.11) -
-    // the operator class itself (gin_trgm_ops) needs pg_trgm, added in
-    // the migration's raw-SQL section below since Drizzle has no typed
-    // helper for a non-default opclass.
     check("gyms_status_check", sql`${table.status} IN ('active', 'closed', 'hidden')`),
   ]
 )
@@ -129,9 +104,7 @@ export const gymPrices = pgTable(
     ),
   },
   (table) => [
-    // "At most two current rows per gym per kind: one verified and one
-    // unverified" (STACK_AND_SCHEMA.md 2.6) - no history, a newer price
-    // of the same kind+status replaces the old one via upsert.
+    // At most one verified + one unverified row per gym per kind; no history.
     uniqueIndex("gym_prices_gym_kind_verified_unique").on(table.gymId, table.kind, table.isVerified),
     check(
       "gym_prices_source_kind_check",
@@ -148,9 +121,7 @@ export const gymSourceRefs = pgTable(
     gymId: bigint("gym_id", { mode: "number" })
       .notNull()
       .references(() => gyms.id, { onDelete: "cascade" }),
-    // "osm | google_maps | places | foursquare", open-ended on purpose -
-    // OOS-1's regional sources (Yandex, Baidu) are just new values here,
-    // no schema change (STACK_AND_SCHEMA.md 2.11).
+    // "osm" | "google_maps" | etc. - open-ended, no schema change per source.
     source: text("source").notNull(),
     externalId: text("external_id").notNull(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
@@ -162,10 +133,8 @@ export const requests = pgTable(
   "requests",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    // Signed-out users never create a request (FR-15: submitting or
-    // requesting changes needs an account; browsing doesn't) - chats are
-    // the one thing a signed-out user can trigger, and chats never
-    // become `requests` rows at all (API.md 1.4).
+    // Signed-out users can't create a request (FR-15) - only chat is
+    // open to them, and a chat never becomes a `requests` row.
     userId: bigint("user_id", { mode: "number" })
       .notNull()
       .references(() => users.id),
@@ -188,15 +157,12 @@ export const gymChanges = pgTable(
   "gym_changes",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    // Null for a chat-found fact - chats never create a `requests` row
-    // at all (API.md 1.4), so there's nothing to point this at.
+    // Null for a chat-found fact - no `requests` row exists for those.
     requestId: bigint("request_id", { mode: "number" }).references(() => requests.id, { onDelete: "cascade" }),
-    // Null for a brand-new gym (nothing exists yet to point at).
+    // Null for a brand-new gym.
     gymId: bigint("gym_id", { mode: "number" }).references(() => gyms.id, { onDelete: "cascade" }),
     proposed: jsonb("proposed").notNull(),
-    // { sourceKind, url, menuPostedOn, matchedAgainst, ... } - what the
-    // bot found and matched against, for admin audit (STACK_AND_SCHEMA.md
-    // 2.1, 2.10).
+    // What the bot found/matched against, for admin audit.
     evidence: jsonb("evidence"),
     reviewStatus: text("review_status").notNull().default("pending_bot"),
     decidedBy: text("decided_by"),
@@ -214,11 +180,7 @@ export const gymChanges = pgTable(
   ]
 )
 
-// Keyed by (geohash, source) per STACK_AND_SCHEMA.md 2.5's recommendation
-// - adding a source (Foursquare, a regional one from OOS-1) is new rows,
-// not a schema change. No standalone `tiles` table: the doc's own
-// recommendation says one only exists if per-tile extras are needed
-// later, which nothing requires yet.
+// Keyed by (geohash, source) - a new source is new rows, not a schema change.
 export const tileFetches = pgTable(
   "tile_fetches",
   {
@@ -238,10 +200,7 @@ export const reviews = pgTable(
     gymId: bigint("gym_id", { mode: "number" })
       .notNull()
       .references(() => gyms.id, { onDelete: "cascade" }),
-    // Nullable: demo reviews migrate in without a user_id (Phase 4,
-    // STACK_AND_SCHEMA.md 2.14 - "Demo reviews come along with user_id
-    // left empty"). The one-per-user-per-gym rule below only applies
-    // once a review actually has a user attached.
+    // Nullable: migrated demo reviews have no user_id.
     userId: bigint("user_id", { mode: "number" }).references(() => users.id),
     rating: smallint("rating").notNull(),
     body: text("body"),
