@@ -1,11 +1,6 @@
-// API.md 2.4: "The watchdog marks overdue requests failed with
-// failureReason: 'timed_out'." Only fires when the BOT STEP ITSELF never
-// finished (a gym_changes row still stuck in pending_bot past the
-// request's deadline - a crashed/stuck worker job) - a request that's
-// correctly waiting on an admin for an awaiting_admin change is not a
-// timeout, no matter how old, since STACK_AND_SCHEMA.md 2.10 only calls
-// a request "pending until every change is decided," with no deadline
-// on how long an admin may take.
+// Marks overdue requests "timed_out" - only when the bot step itself
+// never finished (a gym_changes row stuck in pending_bot). A request
+// correctly waiting on an admin is never a timeout, however old.
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 

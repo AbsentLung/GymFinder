@@ -1,9 +1,5 @@
-// Same free, no-key rate source as the old demo (server/index.js's
-// getFxRates), but backed by the `fx_rates` table instead of an
-// in-memory cache - API.md 2.8 ("workers store usdCents... using a
-// daily rates table") needs this shared across however many worker
-// processes are running, not refetched independently by each one the
-// way a per-process in-memory cache would.
+// Same free rate source as the old demo, backed by the `fx_rates` table
+// instead of an in-memory cache, so it's shared across worker processes.
 import { eq } from "drizzle-orm"
 import { db } from "./db/index.js"
 import { fxRates } from "./db/schema.js"

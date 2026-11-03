@@ -1,12 +1,7 @@
-// Bot review of a `gym_changes` row (STACK_AND_SCHEMA.md 2.10, FR-24 to
-// FR-27) - ported from server/index.js's verifyEditRequest/
-// EDIT_VERIFICATION_TOOLS, generalized from "one field at a time" (the
-// old shape) to the three proposal kinds the new requests module
-// produces (src/routes/requests.ts): a brand-new gym, a non-price field
-// change, and a price change. applyApprovedChange is shared with the
-// admin approve route (src/routes/admin.ts) - approval "applies the
-// change to gyms / gym_prices in one transaction" (API.md 2.6) the same
-// way regardless of who approved it.
+// Bot review of a `gym_changes` row (FR-24 to FR-27) - handles the
+// three proposal kinds: a brand-new gym, a non-price field change, and
+// a price change. applyDecision is shared with the admin approve/reject
+// route, so approval behaves identically no matter who decided it.
 import { sql, eq } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, requests } from "../db/schema.js"
@@ -45,11 +40,8 @@ export type ProposedChange =
       prices: PriceProposal[]
     }
   | { kind: "field"; field: NonPriceField; newValue: unknown; justification: string }
-  // "status" changes (closing/removing a gym) always go straight to
-  // awaiting_admin (STACK_AND_SCHEMA.md 2.6: "always needs an admin") -
-  // handled as its own kind rather than folding into NON_PRICE_FIELDS so
-  // that routing can skip bot verification entirely, not just skip
-  // auto-approval.
+  // Closing/removing a gym always needs an admin - its own kind so
+  // routing can skip bot verification entirely, not just auto-approval.
   | { kind: "status"; newValue: "active" | "closed" | "hidden"; justification: string }
   | ({ kind: "price"; justification: string } & PriceProposal)
 
@@ -118,7 +110,7 @@ const CONFIRM_GYM_EXISTS_TOOL: ToolDef = {
 
 export async function verifyGymChange(change: ProposedChange, gymId: number | null): Promise<ReviewResult> {
   if (change.kind === "status") {
-    // Never bot-reviewed at all, per STACK_AND_SCHEMA.md 2.6.
+    // Never bot-reviewed at all.
     return { reviewStatus: "awaiting_admin", evidence: { reason: "Closing/removing a gym always needs an admin." } }
   }
   if (change.kind === "add_gym") return verifyAddGym(change)
@@ -145,13 +137,8 @@ async function findDuplicateGym(name: string, lat: number, lng: number): Promise
   return match ? { id: match.id } : null
 }
 
-// FR-25's "exists in OpenStreetMap... within about 50 m... with a
-// matching name" - a direct, cheap DB check against OSM-sourced
-// gym_source_refs rows, no LLM call needed. Narrower than
-// findDuplicateGym's 200m/0.4-similarity dup check (which runs first
-// and would normally catch a true duplicate already) - this is a
-// lighter bar specifically to let "it's already in OSM" alone satisfy
-// FR-25, without requiring a Google Maps/website LLM search too.
+// FR-25: "already in OpenStreetMap" alone satisfies verification -
+// cheap DB check against gym_source_refs, no LLM call needed.
 async function findOsmEvidence(name: string, lat: number, lng: number): Promise<string | null> {
   const point = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`
   const rows = await db.execute<{ name: string; name_similarity: number }>(sql`
@@ -304,13 +291,8 @@ async function verifyPriceChange(
     return { reviewStatus: "awaiting_admin", evidence: { reason: `Found a price (${price_amount} ${price_currency}) but couldn't convert its currency to compare.` } }
   }
 
-  // Same 15% tolerance as the old demo (server/index.js's
-  // verifyEditRequest) - a price found via search is often slightly
-  // stale or rounded. Both sides compared in USD cents - foundCents
-  // already is; the proposed value needs the same conversion (it
-  // arrives as amountMinor in ITS OWN currency's minor unit, not USD
-  // cents - comparing it to foundCents directly would silently compare
-  // the wrong units for any non-USD proposal).
+  // 15% tolerance - a searched price is often slightly stale or rounded.
+  // Both sides compared in USD cents.
   const proposedCents = await resolveUsdCents(change.amountMinor, change.currency)
   const withinTolerance = Math.abs(foundCents - proposedCents) <= proposedCents * 0.15
   return withinTolerance
@@ -319,11 +301,7 @@ async function verifyPriceChange(
 }
 
 // Applies an approved/rejected gym_changes row to `gyms`/`gym_prices` in
-// one transaction (API.md 2.6), then recomputes the owning request's
-// derived status - shared by the bot-review worker (this file's own
-// caller) and the admin approve/reject routes (src/routes/admin.ts), so
-// the actual data effect of "approved" is identical no matter who
-// decided it.
+// one transaction, then recomputes the owning request's derived status.
 export async function applyDecision(
   changeId: number,
   decision: { reviewStatus: "approved" | "rejected"; decidedBy: "bot" | "admin"; evidence?: Record<string, unknown> }
@@ -337,9 +315,8 @@ export async function applyDecision(
       await applyProposedChange(tx, proposed, change.gymId, decision.decidedBy)
     } else if (proposed.kind === "price") {
       // A rejected price shouldn't linger as a visible "unverified" row
-      // (it was written immediately on submission - see
-      // src/routes/requests.ts - precisely so users see it right away;
-      // rejecting it is the one path that takes it back down).
+      // - it was written immediately on submission, so this takes it
+      // back down.
       await tx.execute(sql`
         DELETE FROM gym_prices WHERE gym_id = ${change.gymId} AND kind = ${proposed.priceKind} AND is_verified = false
       `)
@@ -361,24 +338,13 @@ export async function applyDecision(
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: number | null, decidedBy: "bot" | "admin"): Promise<void> {
-  // Phase 4's migration carried old gym_submissions into gym_changes
-  // using their ORIGINAL payload shape (migrate-demo-data.ts: `proposed:
-  // s.payload`, e.g. `{ field: "day_pass_price_cents", newValue, ... }`),
-  // predating this ProposedChange union entirely - a few of those rows
-  // are still sitting in awaiting_admin right now. Falling through to
-  // the price branch below for one of those would silently write
-  // `undefined` into gym_prices instead of a real price. Known gap,
-  // flagged rather than silently mishandled - fixing those specific old
-  // rows (or writing an admin-side adapter for the pre-Phase-5 shape) is
-  // follow-up work, not blocking this slice.
+  // A few migrated gym_changes rows predate this union and have no
+  // `kind` - known gap, flagged rather than silently mishandled.
   if (!("kind" in proposed)) {
     throw new Error(`gym_changes row has a pre-Phase-5 proposed shape with no "kind" discriminator: ${JSON.stringify(proposed)}`)
   }
   if (proposed.kind === "add_gym") {
-    // name_location_decided_at stamped on creation - this gym's name/
-    // location came from an approved add_gym change, not OSM, so the
-    // weekly OSM refresh (upsertGym) shouldn't silently overwrite
-    // either of them for a year.
+    // Stamped so the weekly OSM refresh doesn't overwrite this for a year.
     const inserted = await tx.execute(sql`
       INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial, name_location_decided_at)
       VALUES (${proposed.name}, ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326),
@@ -388,9 +354,7 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
     `)
     const newGymId = inserted.rows[0].id
     for (const price of proposed.prices) {
-      // Unverified on arrival, same as every other add_gym price - see
-      // this module's header comment on the scope cut for add_gym price
-      // verification.
+      // Unverified on arrival, same as every other add_gym price.
       const usdCents = await resolveUsdCents(price.amountMinor, price.currency)
       await tx.execute(sql`
         INSERT INTO gym_prices (gym_id, kind, amount_minor, currency, usd_cents, source_kind, source_url, menu_posted_on)
@@ -408,9 +372,8 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
 
   if (proposed.kind === "field") {
     const column = FIELD_TO_COLUMN[proposed.field]
-    // An approved name change re-stamps name_location_decided_at (see
-    // that column's own comment) - a fresh admin/bot decision, so the
-    // weekly OSM refresh should respect it for another year.
+    // Re-stamps name_location_decided_at - a fresh decision, respected
+    // by the weekly OSM refresh for another year.
     if (proposed.field === "name") {
       await tx.execute(sql`UPDATE gyms SET name = ${proposed.newValue}, name_location_decided_at = now() WHERE id = ${gymId}`)
       return
@@ -419,9 +382,7 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
     return
   }
 
-  // price: promote to the verified row, remove the now-superseded
-  // unverified one (STACK_AND_SCHEMA.md 2.6: "when a verified price is
-  // newer... the unverified row is removed").
+  // price: promote to the verified row, remove the now-superseded unverified one.
   const usdCents = await resolveUsdCents(proposed.amountMinor, proposed.currency)
   await tx.execute(sql`
     INSERT INTO gym_prices (gym_id, kind, amount_minor, currency, usd_cents, source_kind, source_url, menu_posted_on, verified_by)
@@ -448,11 +409,9 @@ const FIELD_TO_COLUMN: Record<NonPriceField, string> = {
   hasTrial: "has_trial",
 }
 
-// A request's user-facing status is derived from its gym_changes
-// (STACK_AND_SCHEMA.md 2.10): pending while any change is still
-// pending_bot/awaiting_admin, completed once every change has reached a
-// terminal state (approved/rejected) - which can happen long after the
-// bot's own ~10-minute deadline if a change needed an admin.
+// A request's status is derived from its gym_changes: pending while any
+// change is still open, completed once all are decided - which can be
+// long after the bot's own deadline if a change needed an admin.
 export async function recomputeRequestStatus(requestId: number): Promise<void> {
   const changes = await db.select().from(gymChanges).where(eq(gymChanges.requestId, requestId))
   const stillOpen = changes.some((c) => c.reviewStatus === "pending_bot" || c.reviewStatus === "awaiting_admin")
