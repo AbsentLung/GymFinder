@@ -5,16 +5,10 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useAuth } from '@/auth-context';
 import { API_BASE_URL } from '@/config';
 
-// API.md 2.6 - the admin review queue. gym_changes.proposed is a
-// discriminated union server-side (src/jobs/bot-review.ts's
-// ProposedChange) but rendered generically here rather than importing
-// that type - this screen only ever needs to SHOW a proposal, never
-// construct one, and a couple of rows still on file predate that union
-// entirely (Phase 4's migration carried old gym_submissions over using
-// their original {field, newValue, previousValue} shape, with no `kind`
-// at all - see bot-review.ts's own comment on this known gap). Typed
-// loosely on purpose so both shapes render without the legacy one
-// tripping a type error.
+// The admin review queue. gym_changes.proposed is a discriminated union
+// server-side (bot-review.ts's ProposedChange) but typed loosely here -
+// this screen only shows proposals, and a few legacy rows predate that
+// union's `kind` field entirely.
 interface ProposedLoose {
   kind?: string;
   [key: string]: unknown;
@@ -50,12 +44,8 @@ const REVIEW_STATUS_FILTERS: { value: '' | AdminChange['reviewStatus']; label: s
   { value: 'rejected', label: 'Rejected' },
 ];
 
-// A legacy row has no `kind` discriminator at all - applyProposedChange
-// server-side throws rather than guess what it means (bot-review.ts),
-// so approving one here would just surface that as a raw 500. Reject
-// still works fine (it never touches that code path). Disabling Approve
-// for these specific rows, rather than letting an admin hit the error
-// blind, until those few old rows are migrated to the new shape.
+// Legacy rows have no `kind` - approving would just surface a raw 500
+// server-side, so Approve is disabled for them; Reject still works fine.
 function isLegacyProposal(p: ProposedLoose): boolean {
   return p.kind == null;
 }
@@ -215,7 +205,7 @@ export default function AdminScreen() {
             value={promoteId}
             onChangeText={setPromoteId}
             placeholder="User id"
-            placeholderTextColor="#6C7177"
+            placeholderTextColor={PLACEHOLDER_COLOR}
             keyboardType="numeric"
           />
           <Pressable style={styles.promoteButton} disabled={promoting || !promoteId} onPress={promote}>
@@ -269,7 +259,7 @@ export default function AdminScreen() {
                       value={rejectReason}
                       onChangeText={setRejectReason}
                       placeholder="Why are you rejecting this?"
-                      placeholderTextColor="#6C7177"
+                      placeholderTextColor={PLACEHOLDER_COLOR}
                       multiline
                     />
                     <View style={styles.actions}>
@@ -325,39 +315,45 @@ export default function AdminScreen() {
 
 const ACCENT = '#CEFF45';
 const BG = '#111315';
+const TEXT = '#F4F4F2';
+const TEXT_MUTED = '#A9ADB3';
+const TEXT_DIM = '#777D84';
+const ERROR = '#E9643A';
+const BORDER = '#2C3034';
+const PLACEHOLDER_COLOR = '#6C7177';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, padding: 24, gap: 14, alignItems: 'center' },
-  title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 26, color: '#F4F4F2', width: '100%', maxWidth: 640 },
-  sectionTitle: { color: '#F4F4F2', fontSize: 16, fontWeight: '700', width: '100%', maxWidth: 640, marginTop: 6 },
-  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: '#A9ADB3' },
+  title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 26, color: TEXT, width: '100%', maxWidth: 640 },
+  sectionTitle: { color: TEXT, fontSize: 16, fontWeight: '700', width: '100%', maxWidth: 640, marginTop: 6 },
+  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: TEXT_MUTED },
   submitButton: { backgroundColor: ACCENT, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 20 },
-  submitButtonText: { color: '#111315', fontWeight: '700', fontSize: 14 },
-  promoteRow: { width: '100%', maxWidth: 640, gap: 8, borderWidth: 1, borderColor: '#2C3034', borderRadius: 12, padding: 14 },
-  promoteLabel: { color: '#A9ADB3', fontSize: 12 },
+  submitButtonText: { color: BG, fontWeight: '700', fontSize: 14 },
+  promoteRow: { width: '100%', maxWidth: 640, gap: 8, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14 },
+  promoteLabel: { color: TEXT_MUTED, fontSize: 12 },
   promoteInputRow: { flexDirection: 'row', gap: 8 },
   promoteInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#2C3034',
+    borderColor: BORDER,
     backgroundColor: '#1B1E21',
-    color: '#F4F4F2',
+    color: TEXT,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
   },
   promoteButton: { backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center' },
-  promoteButtonText: { color: '#111315', fontWeight: '700', fontSize: 13 },
+  promoteButtonText: { color: BG, fontWeight: '700', fontSize: 13 },
   filterRow: { flexDirection: 'row', gap: 8, width: '100%', maxWidth: 640, flexWrap: 'wrap' },
-  chip: { borderWidth: 1, borderColor: '#2C3034', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
+  chip: { borderWidth: 1, borderColor: BORDER, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
   chipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
-  chipText: { color: '#A9ADB3', fontSize: 12, fontWeight: '600' },
-  chipTextActive: { color: '#111315' },
-  error: { color: '#E9643A', fontSize: 13 },
+  chipText: { color: TEXT_MUTED, fontSize: 12, fontWeight: '600' },
+  chipTextActive: { color: BG },
+  error: { color: ERROR, fontSize: 13 },
   list: { width: '100%', maxWidth: 640, flex: 1 },
   listContent: { gap: 12, paddingBottom: 24 },
-  row: { borderWidth: 1, borderColor: '#2C3034', borderRadius: 12, padding: 14, gap: 6, backgroundColor: '#1B1E21' },
+  row: { borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14, gap: 6, backgroundColor: '#1B1E21' },
   rowHeader: { flexDirection: 'row', justifyContent: 'space-between' },
   rowType: {
     fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
@@ -366,26 +362,26 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  rowStatus: { fontSize: 11, color: '#777D84', fontWeight: '600' },
-  rowSummary: { color: '#F4F4F2', fontSize: 14, fontWeight: '600' },
-  rowCurrent: { color: '#A9ADB3', fontSize: 12 },
-  rowDescription: { color: '#A9ADB3', fontSize: 13, fontStyle: 'italic' },
-  rowMeta: { color: '#6C7177', fontSize: 11 },
+  rowStatus: { fontSize: 11, color: TEXT_DIM, fontWeight: '600' },
+  rowSummary: { color: TEXT, fontSize: 14, fontWeight: '600' },
+  rowCurrent: { color: TEXT_MUTED, fontSize: 12 },
+  rowDescription: { color: TEXT_MUTED, fontSize: 13, fontStyle: 'italic' },
+  rowMeta: { color: PLACEHOLDER_COLOR, fontSize: 11 },
   actions: { flexDirection: 'row', gap: 8, marginTop: 6 },
   actionButton: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
   actionButtonDisabled: { opacity: 0.4 },
   approveButton: { backgroundColor: ACCENT },
-  approveButtonText: { color: '#111315', fontWeight: '700', fontSize: 13 },
-  denyButton: { borderWidth: 1, borderColor: '#E9643A' },
-  denyButtonText: { color: '#E9643A', fontWeight: '700', fontSize: 13 },
+  approveButtonText: { color: BG, fontWeight: '700', fontSize: 13 },
+  denyButton: { borderWidth: 1, borderColor: ERROR },
+  denyButtonText: { color: ERROR, fontWeight: '700', fontSize: 13 },
   cancelButton: { paddingVertical: 8, paddingHorizontal: 12 },
-  cancelButtonText: { color: '#777D84', fontSize: 13 },
+  cancelButtonText: { color: TEXT_DIM, fontSize: 13 },
   rejectForm: { gap: 8, marginTop: 6 },
   rejectInput: {
     borderWidth: 1,
-    borderColor: '#2C3034',
-    backgroundColor: '#111315',
-    color: '#F4F4F2',
+    borderColor: BORDER,
+    backgroundColor: BG,
+    color: TEXT,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
