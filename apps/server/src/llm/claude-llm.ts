@@ -5,9 +5,8 @@ export class ClaudeLLM implements LLMInterface {
   private client: Anthropic
   private model: string
 
-  // Haiku, not a bigger model - same choice the old demo code made
-  // (server/ai.js's ANTHROPIC_MODEL): this runs on every chat message,
-  // so cost per call matters more than it would for a one-off task.
+  // Haiku, not a bigger model - runs on every chat message, so cost per
+  // call matters.
   constructor(apiKey: string, model = "claude-haiku-4-5-20251001") {
     this.client = new Anthropic({ apiKey })
     this.model = model

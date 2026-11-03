@@ -1,18 +1,12 @@
-// Ported from the vibe-coded demo's server/lib.js (kept there as
-// reference only, per the restructure plan) - same pure, dependency-
-// free functions, same tests (lib.test.ts), just typed. index.js's
-// comments noted a couple of these mirror raw SQL in the old server;
-// those SQL equivalents get re-built properly in the sources/requests
-// modules rather than copied verbatim.
+// Ported from the vibe-coded demo's server/lib.js - same pure functions,
+// just typed.
 
-// No longer Bali-specific - just checks the coordinates are plausible
-// at all (a real lat/lng, not e.g. stray 0,0 from a bad client).
+// Real, plausible lat/lng - not e.g. stray 0,0 from a bad client.
 export function looksLikeRealCoordinates(lat: number, lng: number): boolean {
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && !(lat === 0 && lng === 0)
 }
 
-// 200m + name-similarity > 0.4, both required (STACK_AND_SCHEMA.md
-// 2.11's dedup rule for gyms without a shared external id).
+// 200m + name-similarity > 0.4, both required.
 export function isDuplicateMatch(distanceKm: number, nameSimilarity: number): boolean {
   return distanceKm < 0.2 && nameSimilarity > 0.4
 }
@@ -21,10 +15,8 @@ export function isWithinStaleWindow(lastFetchedAt: string | Date, staleMs: numbe
   return nowMs - new Date(lastFetchedAt).getTime() < staleMs
 }
 
-// A failed fetch (Overpass or the sweep scraper) shouldn't hide a
-// cell's gyms, or block a retry, for the full week/normal staleness
-// window - writing last_fetched_at = now() with status = 'failed' on
-// error made a single Overpass 429 or 502 look "fresh" for a week.
+// Short backoff for a failed fetch, so one Overpass 429 doesn't hide a
+// cell's gyms for the full normal staleness window.
 export const FAILED_FETCH_BACKOFF_MS = 15 * 60 * 1000
 
 export function isFetchRowFresh(
@@ -43,10 +35,8 @@ export interface Bbox {
   maxLng: number
 }
 
-// "Already covered" is inherently a fuzzy question, not a bit-for-bit
-// one - two mathematically-equal floats built via different arithmetic
-// don't always land on the identical double, so the comparison itself
-// needs slack.
+// Fuzzy, not exact equality - two equal floats from different arithmetic
+// don't always land on the identical double.
 export function isBboxCovered(newBbox: Bbox, existingBbox: Bbox, epsilon: number): boolean {
   return (
     existingBbox.minLat <= newBbox.minLat + epsilon &&
@@ -60,8 +50,7 @@ export function getCountryCurrency(countryCode: string, countryToCurrency: Recor
   return countryToCurrency[countryCode] || "USD"
 }
 
-// Pure - takes the already-fetched rates object rather than reaching
-// into the network/cache layer itself.
+// Pure - takes the already-fetched rates object directly.
 export function convertToUsdCents(amount: number, currency: string, rates: Record<string, number>): number {
   if (currency === "USD") return Math.round(amount * 100)
   const rate = rates[currency]
@@ -82,17 +71,13 @@ export interface MapsZoomBbox {
   maxLng: number
 }
 
-// Converts a bounding box to the Google Maps @lat,lng,zoom URL zoom
-// level that shows roughly that area - the standard web-mercator
-// slippy-map relationship.
+// Bbox -> the Google Maps @lat,lng,zoom URL level that shows roughly that area.
 export function bboxToGoogleMapsZoom(bbox: MapsZoomBbox): number {
   const lngSpan = Math.max(bbox.maxLng - bbox.minLng, 0.0001)
   return Math.max(3, Math.min(17, Math.round(Math.log2(360 / lngSpan))))
 }
 
-// A gym can carry several of these at once (STACK_AND_SCHEMA.md 2.8:
-// text[] on gyms) - a fixed, generic list instead of whatever free-text
-// phrase a scrape happened to produce.
+// A gym can carry several of these at once - a fixed list, not raw scraped text.
 export const GYM_CATEGORIES = [
   "Traditional",
   "Group",
@@ -128,10 +113,8 @@ const CATEGORY_KEYWORDS: Record<string, RegExp> = {
   "24hr": /24[- ]?hour|24\/7/i,
 }
 
-// A raw phrase that matches nothing specific falls back to
-// "Traditional". A gym with no scraped category text at all gets no
-// tags at all, not a Traditional default - that's the "Unknown" case
-// the app's own category filter distinguishes from a confirmed plain gym.
+// No match falls back to "Traditional"; no text at all gets no tags
+// ("Unknown", not a Traditional default).
 export function categoriesFromRawText(rawText: string | null | undefined): string[] {
   if (!rawText) return []
   const matched = Object.entries(CATEGORY_KEYWORDS)
@@ -150,9 +133,8 @@ export interface OsmGymFields {
   categories: string[]
 }
 
-// OSM's tags are free-form key/value pairs a volunteer mapper chose to
-// add. Coverage is inherently inconsistent, so every field here is "use
-// it if present," never required.
+// OSM tags are free-form and inconsistently present - every field here
+// is "use it if present," never required.
 export function osmTagsToGymFields(tags: OsmTags | null | undefined): OsmGymFields {
   if (!tags) return { address: null, description: null, categories: [] }
 
@@ -190,12 +172,8 @@ export function requireDescription(description: string | null | undefined): stri
   return description?.trim() ? null : "A description is required."
 }
 
-// PostGIS's ST_GeoHash only encodes (lat/lng -> geohash, used for the
-// generated geohash4/geohash5 columns); the tiles route needs the
-// reverse too, to turn "this geohash4 tile is stale" into an actual
-// bbox it can hand to a source's findGymsInArea. Standard geohash
-// decode: each base32 character contributes 5 bits, alternating
-// between narrowing the longitude and latitude range.
+// PostGIS only encodes lat/lng -> geohash; this is the reverse, for
+// turning a stale tile into a bbox. Standard base32 geohash decode.
 const GEOHASH_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
 
 export interface GeohashBounds {
@@ -232,10 +210,7 @@ export function geohashToBounds(geohash: string): GeohashBounds {
   return { minLat, maxLat, minLng, maxLng }
 }
 
-// All 32 geohash5 cells inside one geohash4 cell - every geohash
-// character appends 5 bits regardless of position, so a parent's
-// children at the next precision are exactly itself plus each of the 32
-// base32 characters, with no gaps or overlaps.
+// All 32 geohash5 cells inside one geohash4 cell.
 export function geohash5ChildrenOf(geohash4: string): string[] {
   return GEOHASH_BASE32.split("").map((c) => geohash4 + c)
 }

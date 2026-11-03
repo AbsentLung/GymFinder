@@ -1,7 +1,5 @@
-// Worker entry point - picks up jobs the API enqueued (DESIGN_DISCUSSION.md
-// Option B). In demo mode this can run in the same process as the API
-// (see package.json's "dev" script); scale mode deploys it separately,
-// auto-scaled on queue depth.
+// Worker entry point - picks up jobs the API enqueued. Demo mode can run
+// it in the same process as the API; scale mode deploys it separately.
 import { queue } from "./queue/index.js"
 import { refreshTile } from "./jobs/tile-refresh.js"
 

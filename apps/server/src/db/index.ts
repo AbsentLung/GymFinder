@@ -1,6 +1,4 @@
-// One pool, one Drizzle instance, shared by every route/worker/auth
-// config - not re-created per module (auth.ts used to open its own
-// separate pool to the same database; consolidated here instead).
+// One pool, one Drizzle instance, shared everywhere - not re-created per module.
 import { drizzle } from "drizzle-orm/node-postgres"
 import pg from "pg"
 import { config } from "../config.js"

@@ -1,9 +1,7 @@
 import type { CacheInterface } from "../interfaces/cache.js"
 
-// Demo mode's CacheInterface - "the cache falls back to in-memory"
-// (DESIGN_DISCUSSION.md 6.1). Per-process only: fine for a single demo
-// VM running API+worker in one process: multiple API copies in scale
-// mode is exactly why that mode switches to Redis instead.
+// Demo mode's CacheInterface. Per-process only - fine for one demo VM;
+// scale mode switches to Redis once there are multiple API copies.
 export class MemoryCache implements CacheInterface {
   private store = new Map<string, { value: string; expiresAt: number | null }>()
 

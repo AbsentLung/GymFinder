@@ -1,8 +1,6 @@
-// GET /v1/tiles/{geohash4} (API.md 2.2). The map loads gyms by fixed
-// geohash4 tile; a stale or never-fetched tile still answers right
-// away with whatever's in Postgres and enqueues a refresh for just the
-// stale geohash5 cells inside it (API.md 1.5) rather than making the
-// request wait on a live Overpass round-trip.
+// GET /v1/tiles/{geohash4}. A stale or never-fetched tile still answers
+// right away from Postgres and enqueues a refresh for the stale
+// geohash5 cells, rather than waiting on a live Overpass round-trip.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
 import { sql, and, eq, inArray } from "drizzle-orm"
@@ -13,10 +11,8 @@ import { geohash5ChildrenOf, isFetchRowFresh } from "../lib.js"
 
 const GEOHASH4_PATTERN = /^[0-9b-hj-km-np-z]{4}$/
 
-// "About a week" (STACK_AND_SCHEMA.md 2.5 / API.md 1.5).
 const STALE_MS = 7 * 24 * 60 * 60 * 1000
-// Cut tiles down to a reasonable size (API.md 2.2: "description is cut
-// to about 300 characters to keep tiles small").
+// Keeps tiles small.
 const DESCRIPTION_MAX_CHARS = 300
 
 interface GymRow {
@@ -54,21 +50,13 @@ export const tilesRoutes: FastifyPluginAsyncZod = async (app) => {
       const fetchRowByCell = new Map(fetchRows.map((r) => [r.geohash, r]))
       const oldestFetchedAt = fetchRows.length > 0 ? Math.min(...fetchRows.map((r) => new Date(r.lastFetchedAt).getTime())) : null
       const missingCells = children.filter((c) => !fetchRowByCell.has(c))
-      // Per-cell, not "is the tile as a whole stale" - queuing every
-      // child cell whenever ANY of them is stale (the previous
-      // behavior) re-fetched cells that didn't need it (#19's "the
-      // comment says it only queues stale ones" gap).
+      // Per-cell, not "is the tile as a whole stale" - avoids re-fetching
+      // cells that don't need it.
       const staleCells = children.filter((c) => !isFetchRowFresh(fetchRowByCell.get(c), STALE_MS))
       const isStale = staleCells.length > 0
 
-      // Correlated subqueries for day-pass price and review-average
-      // rating - a plain JOIN would multiply gym rows per price/review,
-      // which a GROUP BY would then have to undo; a scalar subquery per
-      // gym reads more directly and this table is read-heavy, not
-      // write-heavy, so the extra per-row subquery cost is the right
-      // tradeoff here. Raw sql, not the query builder - STACK_AND_SCHEMA.md
-      // 1.3's own escape-hatch guidance for geo/aggregate queries Drizzle
-      // can't express cleanly.
+      // Correlated subqueries, not a JOIN + GROUP BY - a plain JOIN would
+      // multiply gym rows per price/review. Raw sql, not the query builder.
       const result = await db.execute<GymRow>(sql`
         SELECT g.id, g.name, ST_X(g.location) AS lng, ST_Y(g.location) AS lat, g.address, g.description,
                g.categories, g.accepts_drop_in, g.has_trial,
@@ -94,11 +82,7 @@ export const tilesRoutes: FastifyPluginAsyncZod = async (app) => {
       }))
 
       for (const cell of staleCells) {
-        // jobId dedupes - several requests hitting a stale tile at
-        // once before the first refresh finishes only enqueue one job
-        // per cell (DESIGN_DISCUSSION.md 5.3: "merge duplicate jobs,
-        // same tile"). "-" not ":" - BullMQ rejects a custom id with a
-        // colon in it (#19).
+        // jobId dedupes several requests hitting a stale tile at once.
         await queue.add("tile-refresh", { geohash5: cell }, { jobId: `tile-refresh-${cell}` })
       }
 

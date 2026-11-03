@@ -1,8 +1,6 @@
-// Processes one geohash5 cell: fetch it from Overpass, merge results
-// into `gyms` (dedup via gym_source_refs, same shape as
-// migrate-demo-data.ts's gym upsert), record the fetch in tile_fetches
-// either way (success or failure) so a dead cell doesn't get retried on
-// every single tile request that includes it.
+// Fetches one geohash5 cell from Overpass, merges into `gyms`, and
+// records the fetch in tile_fetches either way so a dead cell isn't
+// retried on every request.
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { geohashToBounds, isDuplicateMatch } from "../lib.js"
@@ -46,23 +44,16 @@ async function upsertGym(g: RawGym) {
   let gymId: number
   if (existing.rows[0]) {
     gymId = existing.rows[0].gym_id
-    // name/location: OSM is treated as authoritative, same as the old
-    // demo's mergeGymsIntoDb. address/description: COALESCE, fill the
-    // gap only - never overwrite a better answer the bot/admin/chat
-    // already gave.
+    // name/location: OSM is authoritative. address/description: COALESCE
+    // only, never overwrite a better answer already on file.
     await db.execute(sql`
       UPDATE gyms SET name = ${g.name}, location = ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326),
         address = COALESCE(address, ${g.address ?? null}), description = COALESCE(description, ${g.description ?? null})
       WHERE id = ${gymId}
     `)
   } else {
-    // OSM itself sometimes maps the same real-world gym twice under two
-    // different element ids - a plain osm_id match can never catch that
-    // (neither id collides with the other's). Caught live in the
-    // vibe-coded demo ("Income Gym" mapped twice, ~4m apart, producing a
-    // permanently-stuck 2-pin map cluster) and fixed there the same way:
-    // check name+proximity against every OTHER known gym before
-    // inserting, same threshold the rest of this app uses for dedup.
+    // OSM can map the same real gym under two different element ids - a
+    // plain osm_id match can't catch that, so check name+proximity too.
     const nearby = await db.execute<{ gym_id: number; name_similarity: number; distance_km: number }>(sql`
       SELECT r.gym_id, similarity(g.name, ${g.name}) AS name_similarity,
         (6371 * acos(GREATEST(-1, LEAST(1,
@@ -100,8 +91,7 @@ async function upsertGym(g: RawGym) {
   }
 
   if (g.categories && g.categories.length > 0) {
-    // Additive merge (union), never replaces - same rule
-    // migrate-demo-data.ts and the old demo both use.
+    // Additive merge (union), never replaces.
     await db.execute(sql`UPDATE gyms SET categories = ARRAY(SELECT DISTINCT unnest(categories || ${g.categories})) WHERE id = ${gymId}`)
   }
 }
