@@ -2,6 +2,7 @@
 // script. This file is the actual auth wiring; routes mount in
 // src/routes/auth.ts.
 import { betterAuth } from "better-auth"
+import { expo } from "@better-auth/expo"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import bcrypt from "bcryptjs"
 import { db, schema } from "./db/index.js"
@@ -12,6 +13,17 @@ export const auth = betterAuth({
   // Default is "/api/auth" - without this, every path mounted at
   // /v1/auth/* 404s (Better Auth parses against its own basePath).
   basePath: "/v1/auth",
+  // Lets Better Auth recognize requests from the Expo app's own scheme,
+  // not just a real browser origin.
+  plugins: [expo()],
+  // NODE_ENV, not MODE - MODE=demo is a real production tier, so
+  // trusting any exp:// dev-tunnel origin there would be a real hole.
+  // config.webOrigin covers the web app, checked on every platform.
+  trustedOrigins: [
+    "travelapp://",
+    config.webOrigin,
+    ...(process.env.NODE_ENV !== "production" ? ["exp://", "exp://**", "exp://192.168.*.*:*/**"] : []),
+  ],
   // Merges with the real `users` table instead of generating a
   // conflicting one of its own.
   database: drizzleAdapter(db, { provider: "pg", schema }),
