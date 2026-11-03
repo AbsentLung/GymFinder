@@ -23,19 +23,24 @@ export class PgBossQueue implements QueueInterface {
   }
 
   // `exclusive` policy is what actually makes singletonKey dedupe
-  // anything - caught live: pg-boss's default queue policy ('standard')
-  // accepts a singletonKey argument without error but doesn't enforce
-  // any uniqueness on it at all, so two `add()` calls with the same
-  // jobId silently queued two separate jobs instead of merging. Only
-  // safe to apply blindly because every caller of this queue always
-  // supplies a jobId (confirmed: the one caller today, the tiles route,
-  // always does) - `exclusive` also coalesces jobs with NO singletonKey
-  // onto the same empty-string slot, which would wrongly serialize an
-  // all-jobId-less queue to one job at a time. A future queue that mixes
-  // jobId and non-jobId sends would need its own non-exclusive queue.
+  // anything - pg-boss's default queue policy ('standard') accepts a
+  // singletonKey argument without error but doesn't enforce any
+  // uniqueness on it at all, so two `add()` calls with the same jobId
+  // silently queued two separate jobs instead of merging.
+  //
+  // But `exclusive` ALSO coalesces jobs with NO singletonKey onto the
+  // same empty-string slot - a queue whose jobs are each independent
+  // (nothing to dedupe) and never pass a jobId would get wrongly
+  // serialized to one in-flight job at a time, silently dropping every
+  // other `send` while one is queued or running. Opting queues in by
+  // name, rather than applying `exclusive` everywhere, is what avoids
+  // that trap for whatever's added next - add a queue here only once
+  // every one of its `send`s actually supplies a jobId.
+  private static readonly SINGLETON_QUEUES = new Set(["tile-refresh"])
+
   private async ensureQueue(name: string) {
     if (this.knownQueues.has(name)) return
-    await this.boss.createQueue(name, { policy: "exclusive" })
+    await this.boss.createQueue(name, PgBossQueue.SINGLETON_QUEUES.has(name) ? { policy: "exclusive" } : {})
     this.knownQueues.add(name)
   }
 
