@@ -40,6 +40,7 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "migrate-demo-data": "tsx scripts/migrate-demo-data.ts"
+    "migrate-demo-data": "tsx scripts/migrate-demo-data.ts",
+    "seed": "tsx scripts/seed.ts"
   }
 }

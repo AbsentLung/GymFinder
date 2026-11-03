@@ -1,7 +1,13 @@
 // Business code only imports `queue` from src/queue/index.ts, never
 // pg-boss or bullmq directly - keeps it mode-agnostic.
+//
+// Named levels, not a raw number - pg-boss and BullMQ order priority in
+// OPPOSITE directions. Each implementation maps these to its own
+// correct numbers internally.
+export type JobPriority = "low" | "normal" | "high"
+
 export interface JobOptions {
-  priority?: number
+  priority?: JobPriority
   /** Delay before the job becomes eligible to run, in milliseconds. */
   delay?: number
   /** Dedup key - adding a job with a jobId already active/queued is a no-op. */

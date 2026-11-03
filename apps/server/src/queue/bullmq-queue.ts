@@ -3,7 +3,16 @@
 // Redis run before trusting it in production.
 import { Queue, Worker, type ConnectionOptions } from "bullmq"
 import { Redis } from "ioredis"
-import type { QueueInterface, JobOptions, JobHandler } from "../interfaces/queue.js"
+import type { QueueInterface, JobOptions, JobHandler, JobPriority } from "../interfaces/queue.js"
+
+// BullMQ's own priority is "lower number runs first" - the OPPOSITE of
+// pg-boss's "higher number runs first" (src/queue/pgboss-queue.ts).
+// Every level gets an explicit number, including "normal": BullMQ also
+// treats a job with NO priority set as more urgent than any explicitly
+// prioritized job (confirmed against its own JobsOptions doc comment,
+// not assumed) - leaving "normal" unset would put it ahead of "high"
+// instead of between "high" and "low".
+const PRIORITY_RANK: Record<JobPriority, number> = { high: 1, normal: 50, low: 100 }
 
 export class BullMqQueue implements QueueInterface {
   private connection: ConnectionOptions
@@ -37,7 +46,7 @@ export class BullMqQueue implements QueueInterface {
 
   async add<T extends Record<string, unknown>>(queueName: string, payload: T, opts: JobOptions = {}) {
     const job = await this.getQueue(queueName).add(queueName, payload, {
-      priority: opts.priority,
+      priority: opts.priority !== undefined ? PRIORITY_RANK[opts.priority] : undefined,
       delay: opts.delay,
       jobId: opts.jobId,
       // BullMQ keeps a finished job's id by default - without this, a

@@ -2,7 +2,12 @@
 // files - its README's example code is out of date with the real API.
 import { PgBoss } from "pg-boss"
 import type { Job } from "pg-boss"
-import type { QueueInterface, JobOptions, JobHandler } from "../interfaces/queue.js"
+import type { QueueInterface, JobOptions, JobHandler, JobPriority } from "../interfaces/queue.js"
+
+// pg-boss orders by `priority DESC` (confirmed by reading
+// pg-boss/dist/plans.js directly, same discipline as the exclusive-
+// policy bug below) - higher number runs first.
+const PRIORITY_RANK: Record<JobPriority, number> = { low: 1, normal: 5, high: 10 }
 
 export class PgBossQueue implements QueueInterface {
   private boss: PgBoss
@@ -38,7 +43,7 @@ export class PgBossQueue implements QueueInterface {
     // pg-boss rejects `priority: undefined` as "not an integer" - keys
     // can only be included when they have a value.
     const id = await this.boss.send(queueName, payload, {
-      ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
+      ...(opts.priority !== undefined ? { priority: PRIORITY_RANK[opts.priority] } : {}),
       ...(opts.delay !== undefined ? { startAfter: new Date(Date.now() + opts.delay) } : {}),
       // pg-boss's dedup mechanism is `singletonKey`, not a supplied id.
       ...(opts.jobId !== undefined ? { singletonKey: opts.jobId } : {}),
