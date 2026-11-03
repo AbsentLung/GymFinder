@@ -282,10 +282,10 @@ How requests are created, endpoint by endpoint or through one generic endpoint:
 
 | Method | Path | Who | Body | What happens |
 |---|---|---|---|---|
-| POST | `/v1/sweeps` | 🔒 | `{ geohash }` or `{ bbox }` (split into geohash5 tiles, capped count) | Sweep job per tile (FR-11). A tile swept recently returns `200` with an already-`completed` request; a tile already queued attaches to the existing job (same request returned). `result: { gymsFound, gymsNew }`. |
+| POST | `/v1/sweeps` | 🌐 | `{ geohash }` or `{ bbox }` (split into geohash5 tiles, capped count) | Sweep job per tile (FR-11). **No sign-in needed** (Joey, 2026-11-03); rate limited per user, or per IP when signed out. A signed-out sweep's request has no `userId` and isn't listed on any "My requests" page. A tile swept recently returns `200` with an already-`completed` request; a tile already queued attaches to the existing job (same request returned). `result: { gymsFound, gymsNew }`. |
 | POST | `/v1/gyms` | 🔒 | Proposed new gym: name, location, categories, prices with `sourceKind` / `sourceUrl` / `menuPostedOn`, ... | Add-gym request (FR-16). One `gym_changes` row, then bot review. |
 | POST | `/v1/gyms/{id}/changes` | 🔒 | Partial update with evidence for any price | Update-gym request (FR-16). |
-| GET | `/v1/requests/{id}` | 🔒 | | Current status (polling). Readable by the user who made it, or an admin. |
+| GET | `/v1/requests/{id}` | 🔒 / 🌐 | | Current status (polling). Add/update-gym requests: readable by the user who made it, or an admin. Sweep requests: readable by anyone (they only hold a geohash and counts), so a signed-out user can poll their sweep. |
 | POST | `/v1/requests/{id}/retry` | 🔒 | | Only for `failed` requests: creates a new request with the same input and returns it. |
 
 `changes` lists the `gym_changes` a request produced, each with `reviewStatus` (`pending_bot`, `awaiting_admin`, `approved`, `rejected`) and a short reason when rejected. The status the user sees on "My requests" is derived (STACK_AND_SCHEMA.md 2.10): `failed` if the job failed, `pending` until every change is decided, then `completed` with counts.
