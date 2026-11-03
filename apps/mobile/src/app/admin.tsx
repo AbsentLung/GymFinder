@@ -1,92 +1,184 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '@/auth-context';
 import { API_BASE_URL } from '@/config';
 
-interface Submission {
-  id: string;
-  gym_id: number | null;
-  gym_name: string | null;
-  submitted_by_name: string;
-  submitted_by_user_id: string | null;
-  submission_type: 'new_gym' | 'edit' | 'admin_request';
-  description: string | null;
-  payload: Record<string, any>;
-  status_id: number;
-  status_label: string;
-  created_at: string;
+// API.md 2.6 - the admin review queue. gym_changes.proposed is a
+// discriminated union server-side (src/jobs/bot-review.ts's
+// ProposedChange) but rendered generically here rather than importing
+// that type - this screen only ever needs to SHOW a proposal, never
+// construct one, and a couple of rows still on file predate that union
+// entirely (Phase 4's migration carried old gym_submissions over using
+// their original {field, newValue, previousValue} shape, with no `kind`
+// at all - see bot-review.ts's own comment on this known gap). Typed
+// loosely on purpose so both shapes render without the legacy one
+// tripping a type error.
+interface ProposedLoose {
+  kind?: string;
+  [key: string]: unknown;
 }
 
-const TYPE_FILTERS: { value: string; label: string }[] = [
-  { value: '', label: 'All types' },
-  { value: 'new_gym', label: 'Gym creation' },
-  { value: 'edit', label: 'Gym edit' },
-  { value: 'admin_request', label: 'Admin request' },
+interface AdminChange {
+  id: string;
+  requestId: string | null;
+  gymId: string | null;
+  proposed: ProposedLoose;
+  currentGym: {
+    id: number;
+    name: string;
+    location: { lat: number; lng: number };
+    address: string | null;
+    description: string | null;
+    categories: string[];
+    acceptsDropIn: boolean | null;
+    hasTrial: boolean | null;
+    status: string;
+  } | null;
+  evidence: { reason?: string; sourceUrl?: string; foundAmount?: number; foundCurrency?: string } | null;
+  reviewStatus: 'pending_bot' | 'awaiting_admin' | 'approved' | 'rejected';
+  decidedBy: 'bot' | 'admin' | null;
+  createdAt: string;
+}
+
+const REVIEW_STATUS_FILTERS: { value: '' | AdminChange['reviewStatus']; label: string }[] = [
+  { value: 'awaiting_admin', label: 'Awaiting admin' },
+  { value: '', label: 'All' },
+  { value: 'pending_bot', label: 'Pending bot' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'rejected', label: 'Rejected' },
 ];
 
-const STATUS_FILTERS: { value: string; label: string }[] = [
-  { value: '2', label: 'Pending' },
-  { value: '3', label: 'Approved' },
-  { value: '4', label: 'Denied' },
-  { value: '', label: 'All statuses' },
-];
+// A legacy row has no `kind` discriminator at all - applyProposedChange
+// server-side throws rather than guess what it means (bot-review.ts),
+// so approving one here would just surface that as a raw 500. Reject
+// still works fine (it never touches that code path). Disabling Approve
+// for these specific rows, rather than letting an admin hit the error
+// blind, until those few old rows are migrated to the new shape.
+function isLegacyProposal(p: ProposedLoose): boolean {
+  return p.kind == null;
+}
 
-function summarize(s: Submission): string {
-  if (s.submission_type === 'new_gym') return `New gym: "${s.payload.name}"`;
-  if (s.submission_type === 'edit') return `Edit "${s.gym_name ?? `gym #${s.gym_id}`}" — ${s.payload.field}: ${s.payload.previousValue ?? '(none)'} → ${s.payload.newValue}`;
-  return 'Admin application';
+function summarizeProposed(p: ProposedLoose): string {
+  if (isLegacyProposal(p)) {
+    return `${p.field}: ${p.previousValue ?? '(none)'} → ${p.newValue} (legacy format)`;
+  }
+  if (p.kind === 'add_gym') {
+    const lat = typeof p.lat === 'number' ? p.lat.toFixed(4) : p.lat;
+    const lng = typeof p.lng === 'number' ? p.lng.toFixed(4) : p.lng;
+    return `New gym: "${p.name}" at ${lat}, ${lng}`;
+  }
+  if (p.kind === 'status') return `Status → ${p.newValue}`;
+  if (p.kind === 'price') {
+    return `${p.priceKind}: ${p.amountMinor} ${p.currency} (source: ${p.sourceKind}${p.sourceUrl ? `, ${p.sourceUrl}` : ''})`;
+  }
+  if (p.kind === 'field') {
+    const value = Array.isArray(p.newValue) ? p.newValue.join(', ') : String(p.newValue);
+    return `${p.field} → ${value}`;
+  }
+  return JSON.stringify(p);
 }
 
 export default function AdminScreen() {
   const router = useRouter();
   const { user, loading, authHeaders } = useAuth();
-  const [typeFilter, setTypeFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('2');
-  const [submissions, setSubmissions] = useState<Submission[] | null>(null);
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<'' | AdminChange['reviewStatus']>('awaiting_admin');
+  const [changes, setChanges] = useState<AdminChange[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [actingOn, setActingOn] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [promoteId, setPromoteId] = useState('');
+  const [promoting, setPromoting] = useState(false);
+  const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = async (cursor?: string) => {
     const params = new URLSearchParams();
-    if (typeFilter) params.set('type', typeFilter);
-    if (statusFilter) params.set('status', statusFilter);
+    if (reviewStatusFilter) params.set('reviewStatus', reviewStatusFilter);
+    if (cursor) params.set('cursor', cursor);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/submissions?${params}`, { headers: await authHeaders(), credentials: 'include' });
+      const res = await fetch(`${API_BASE_URL}/v1/admin/changes?${params}`, { headers: await authHeaders(), credentials: 'include' });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error ?? 'Failed to load submissions.');
+        setError(data.error ?? 'Failed to load changes.');
         return;
       }
-      setSubmissions(data);
+      setChanges((prev) => (cursor ? [...(prev ?? []), ...data.items] : data.items));
+      setNextCursor(data.nextCursor ? String(data.nextCursor) : null);
       setError(null);
     } catch {
-      setError('Failed to load submissions.');
+      setError('Failed to load changes.');
     }
   };
 
   useEffect(() => {
     if (user?.isAdmin) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.isAdmin, typeFilter, statusFilter]);
+  }, [user?.isAdmin, reviewStatusFilter]);
 
-  const decide = async (id: string, decision: 'approve' | 'deny') => {
+  const approve = async (id: string) => {
     setActingOn(id);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/submissions/${id}/${decision}`, {
+      const res = await fetch(`${API_BASE_URL}/v1/admin/changes/${id}/approve`, {
         method: 'POST',
         headers: await authHeaders(),
         credentials: 'include',
       });
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error ?? `Failed to ${decision}.`);
+        setError(data.error ?? 'Failed to approve.');
       } else {
         await load();
       }
     } finally {
       setActingOn(null);
+    }
+  };
+
+  const reject = async (id: string) => {
+    if (!rejectReason.trim()) return;
+    setActingOn(id);
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/admin/changes/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ reason: rejectReason.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error ?? 'Failed to reject.');
+      } else {
+        setRejectingId(null);
+        setRejectReason('');
+        await load();
+      }
+    } finally {
+      setActingOn(null);
+    }
+  };
+
+  const promote = async () => {
+    const id = parseInt(promoteId, 10);
+    if (!Number.isFinite(id) || promoting) return;
+    setPromoting(true);
+    setPromoteMessage(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/v1/admin/users/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ role: 'admin' }),
+      });
+      const data = await res.json();
+      setPromoteMessage(res.ok ? `User #${data.id} is now an admin.` : data.error ?? 'Failed to promote.');
+      if (res.ok) setPromoteId('');
+    } catch {
+      setPromoteMessage('Failed to promote.');
+    } finally {
+      setPromoting(false);
     }
   };
 
@@ -106,36 +198,42 @@ export default function AdminScreen() {
   if (!user.isAdmin) {
     return (
       <View style={styles.container}>
-        <Text style={styles.subtitle}>Admins only. Apply from your profile page.</Text>
-        <Pressable style={styles.submitButton} onPress={() => router.push('/profile')}>
-          <Text style={styles.submitButtonText}>Go to profile</Text>
-        </Pressable>
+        <Text style={styles.subtitle}>Admins only.</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Requests</Text>
-      <View style={styles.filterRow}>
-        {TYPE_FILTERS.map((f) => (
-          <Pressable
-            key={f.value}
-            style={[styles.chip, typeFilter === f.value && styles.chipActive]}
-            onPress={() => setTypeFilter(f.value)}
-          >
-            <Text style={[styles.chipText, typeFilter === f.value && styles.chipTextActive]}>{f.label}</Text>
+      <Text style={styles.title}>Admin</Text>
+
+      <View style={styles.promoteRow}>
+        <Text style={styles.promoteLabel}>Promote a user to admin (by id):</Text>
+        <View style={styles.promoteInputRow}>
+          <TextInput
+            style={styles.promoteInput}
+            value={promoteId}
+            onChangeText={setPromoteId}
+            placeholder="User id"
+            placeholderTextColor="#6C7177"
+            keyboardType="numeric"
+          />
+          <Pressable style={styles.promoteButton} disabled={promoting || !promoteId} onPress={promote}>
+            <Text style={styles.promoteButtonText}>{promoting ? 'Promoting…' : 'Promote'}</Text>
           </Pressable>
-        ))}
+        </View>
+        {promoteMessage && <Text style={styles.subtitle}>{promoteMessage}</Text>}
       </View>
+
+      <Text style={styles.sectionTitle}>Review queue</Text>
       <View style={styles.filterRow}>
-        {STATUS_FILTERS.map((f) => (
+        {REVIEW_STATUS_FILTERS.map((f) => (
           <Pressable
             key={f.value}
-            style={[styles.chip, statusFilter === f.value && styles.chipActive]}
-            onPress={() => setStatusFilter(f.value)}
+            style={[styles.chip, reviewStatusFilter === f.value && styles.chipActive]}
+            onPress={() => setReviewStatusFilter(f.value)}
           >
-            <Text style={[styles.chipText, statusFilter === f.value && styles.chipTextActive]}>{f.label}</Text>
+            <Text style={[styles.chipText, reviewStatusFilter === f.value && styles.chipTextActive]}>{f.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -143,38 +241,83 @@ export default function AdminScreen() {
       {error && <Text style={styles.error}>{error}</Text>}
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-        {submissions?.length === 0 && <Text style={styles.subtitle}>No requests match these filters.</Text>}
-        {submissions?.map((s) => (
-          <View key={s.id} style={styles.row}>
+        {changes?.length === 0 && <Text style={styles.subtitle}>No changes match these filters.</Text>}
+        {changes?.map((c) => (
+          <View key={c.id} style={styles.row}>
             <View style={styles.rowHeader}>
-              <Text style={styles.rowType}>{TYPE_FILTERS.find((t) => t.value === s.submission_type)?.label}</Text>
-              <Text style={styles.rowStatus}>{s.status_label}</Text>
+              <Text style={styles.rowType}>{c.gymId ? `Gym #${c.gymId}` : 'New gym'}</Text>
+              <Text style={styles.rowStatus}>
+                {c.reviewStatus}
+                {c.decidedBy ? ` · ${c.decidedBy}` : ''}
+              </Text>
             </View>
-            <Text style={styles.rowSummary}>{summarize(s)}</Text>
-            {s.description && <Text style={styles.rowDescription}>“{s.description}”</Text>}
-            <Text style={styles.rowMeta}>
-              by {s.submitted_by_name} · {new Date(s.created_at).toLocaleString()}
-            </Text>
-            {s.status_id === 2 && (
-              <View style={styles.actions}>
-                <Pressable
-                  style={[styles.actionButton, styles.approveButton]}
-                  disabled={actingOn === s.id}
-                  onPress={() => decide(s.id, 'approve')}
-                >
-                  <Text style={styles.approveButtonText}>Approve</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.actionButton, styles.denyButton]}
-                  disabled={actingOn === s.id}
-                  onPress={() => decide(s.id, 'deny')}
-                >
-                  <Text style={styles.denyButtonText}>Deny</Text>
-                </Pressable>
-              </View>
+            <Text style={styles.rowSummary}>{summarizeProposed(c.proposed)}</Text>
+            {c.currentGym && (
+              <Text style={styles.rowCurrent}>
+                Current: {c.currentGym.name} — {c.currentGym.address ?? 'no address on file'}
+              </Text>
+            )}
+            {c.evidence?.reason && <Text style={styles.rowDescription}>Bot/admin note: “{c.evidence.reason}”</Text>}
+            <Text style={styles.rowMeta}>{new Date(c.createdAt).toLocaleString()}</Text>
+
+            {c.reviewStatus === 'awaiting_admin' && (
+              <>
+                {rejectingId === c.id ? (
+                  <View style={styles.rejectForm}>
+                    <TextInput
+                      style={styles.rejectInput}
+                      value={rejectReason}
+                      onChangeText={setRejectReason}
+                      placeholder="Why are you rejecting this?"
+                      placeholderTextColor="#6C7177"
+                      multiline
+                    />
+                    <View style={styles.actions}>
+                      <Pressable
+                        style={[styles.actionButton, styles.denyButton]}
+                        disabled={actingOn === c.id || !rejectReason.trim()}
+                        onPress={() => reject(c.id)}
+                      >
+                        <Text style={styles.denyButtonText}>Confirm reject</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.cancelButton}
+                        onPress={() => {
+                          setRejectingId(null);
+                          setRejectReason('');
+                        }}
+                      >
+                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.actions}>
+                    <Pressable
+                      style={[styles.actionButton, styles.approveButton, isLegacyProposal(c.proposed) && styles.actionButtonDisabled]}
+                      disabled={actingOn === c.id || isLegacyProposal(c.proposed)}
+                      onPress={() => approve(c.id)}
+                    >
+                      <Text style={styles.approveButtonText}>Approve</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.actionButton, styles.denyButton]}
+                      disabled={actingOn === c.id}
+                      onPress={() => setRejectingId(c.id)}
+                    >
+                      <Text style={styles.denyButtonText}>Reject</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </>
             )}
           </View>
         ))}
+        {nextCursor && (
+          <Pressable style={styles.loadMoreButton} onPress={() => load(nextCursor)}>
+            <Text style={styles.loadMoreButtonText}>Load more</Text>
+          </Pressable>
+        )}
       </ScrollView>
     </View>
   );
@@ -186,9 +329,26 @@ const BG = '#111315';
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, padding: 24, gap: 14, alignItems: 'center' },
   title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 26, color: '#F4F4F2', width: '100%', maxWidth: 640 },
+  sectionTitle: { color: '#F4F4F2', fontSize: 16, fontWeight: '700', width: '100%', maxWidth: 640, marginTop: 6 },
   subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: '#A9ADB3' },
   submitButton: { backgroundColor: ACCENT, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 20 },
   submitButtonText: { color: '#111315', fontWeight: '700', fontSize: 14 },
+  promoteRow: { width: '100%', maxWidth: 640, gap: 8, borderWidth: 1, borderColor: '#2C3034', borderRadius: 12, padding: 14 },
+  promoteLabel: { color: '#A9ADB3', fontSize: 12 },
+  promoteInputRow: { flexDirection: 'row', gap: 8 },
+  promoteInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#2C3034',
+    backgroundColor: '#1B1E21',
+    color: '#F4F4F2',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+  },
+  promoteButton: { backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center' },
+  promoteButtonText: { color: '#111315', fontWeight: '700', fontSize: 13 },
   filterRow: { flexDirection: 'row', gap: 8, width: '100%', maxWidth: 640, flexWrap: 'wrap' },
   chip: { borderWidth: 1, borderColor: '#2C3034', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
   chipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
@@ -208,12 +368,30 @@ const styles = StyleSheet.create({
   },
   rowStatus: { fontSize: 11, color: '#777D84', fontWeight: '600' },
   rowSummary: { color: '#F4F4F2', fontSize: 14, fontWeight: '600' },
+  rowCurrent: { color: '#A9ADB3', fontSize: 12 },
   rowDescription: { color: '#A9ADB3', fontSize: 13, fontStyle: 'italic' },
   rowMeta: { color: '#6C7177', fontSize: 11 },
   actions: { flexDirection: 'row', gap: 8, marginTop: 6 },
   actionButton: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
+  actionButtonDisabled: { opacity: 0.4 },
   approveButton: { backgroundColor: ACCENT },
   approveButtonText: { color: '#111315', fontWeight: '700', fontSize: 13 },
   denyButton: { borderWidth: 1, borderColor: '#E9643A' },
   denyButtonText: { color: '#E9643A', fontWeight: '700', fontSize: 13 },
+  cancelButton: { paddingVertical: 8, paddingHorizontal: 12 },
+  cancelButtonText: { color: '#777D84', fontSize: 13 },
+  rejectForm: { gap: 8, marginTop: 6 },
+  rejectInput: {
+    borderWidth: 1,
+    borderColor: '#2C3034',
+    backgroundColor: '#111315',
+    color: '#F4F4F2',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    minHeight: 50,
+  },
+  loadMoreButton: { alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 20 },
+  loadMoreButtonText: { color: ACCENT, fontSize: 13, fontWeight: '600' },
 });
