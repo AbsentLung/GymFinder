@@ -1,22 +1,8 @@
-// API.md 2.4 / FR-11: "a user can request that a bot sweeps an area on
-// Google Maps to find gyms missing from the map." Reuses the same
-// gym_source_refs merge/dedup mechanics as the background Overpass
-// refresh (src/jobs/gym-upsert.ts) with source="google_maps" - a gym
-// Google Maps lists is itself one of the three sources FR-25 treats as
-// already verified (our database, Google Maps, the gym's own website),
-// so a sweep-found NEW gym's gym_changes row is created already decided
-// (reviewStatus: "approved", decidedBy: "bot") - there's nothing for a
-// separate bot-review LLM pass to independently confirm that the sweep
-// itself didn't already establish by construction. Matches
-// STACK_AND_SCHEMA.md 2.10's own ER diagram, which shows a sweep
-// producing already-`approved` gym_changes rows directly.
-//
-// Deliberate scope cut: the old demo's researchNewGym (an LLM pass that
-// fills in a newly-found gym's price/description/category after the
-// scrape) isn't ported here - a sweep-found gym starts with just
-// name/lat/lng, same minimal shape the Google Maps results list itself
-// gives. A later chat question or edit request about that gym still
-// goes through the normal, full bot-review pipeline.
+// A bot sweeps an area on Google Maps for missing gyms. Google Maps is
+// itself one of FR-25's verified sources, so a sweep-found gym's
+// gym_changes row is created already approved - no separate bot-review
+// pass needed. Starts with just name/lat/lng; a later chat question or
+// edit still goes through the normal pipeline.
 import { sql, eq } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, requests } from "../db/schema.js"
@@ -26,14 +12,8 @@ import { GoogleMapsBlockedError } from "../sources/google-maps-source.js"
 import { upsertGym } from "./gym-upsert.js"
 import type { ProposedChange } from "./bot-review.js"
 
-// Module-level, not persisted - this process's own "how long to back
-// off" state (STACK_AND_SCHEMA.md's "slower rate, longer pauses" when
-// Google blocks the scraper). Doubles on every consecutive block, up
-// to a 6-hour cap; a successful scrape resets it. Deliberately process-
-// local rather than a DB/cache row: in scale mode each worker process
-// backing off independently is fine - the point is never hammering
-// Google at full rate right after it's already said no, not a single
-// global rate limiter.
+// Process-local backoff state - doubles on every consecutive Google
+// block, up to a 6-hour cap; a clean scrape resets it.
 const INITIAL_BACKOFF_MS = 10 * 60 * 1000
 const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000
 let blockedUntil = 0
@@ -76,12 +56,8 @@ export async function processSweep({ requestId, geohash5 }: { requestId: number;
         description: g.description ?? null,
         prices: [],
       }
-      // Already-decided, not queued for bot-review - see this file's
-      // header comment. applyProposedChange isn't called either:
-      // upsertGym already did the actual write (gyms + gym_source_refs),
-      // this row is the audit trail (STACK_AND_SCHEMA.md 2.10 -
-      // "gym_changes doubles as the audit log of every change to every
-      // gym"), not a second write of the same gym.
+      // Already-decided, not queued for bot-review - upsertGym already
+      // did the write; this row is just the audit trail.
       await db.insert(gymChanges).values({
         requestId,
         gymId: result.gymId,

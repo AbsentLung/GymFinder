@@ -15,14 +15,10 @@ import { checkRateLimit } from "../rate-limit.js"
 
 const BOT_REVIEW_DEADLINE_MS = 10 * 60 * 1000
 const SWEEP_DEADLINE_MS = 60 * 60 * 1000
-// "Recently swept" - no number given in the docs for this specifically;
-// reusing tiles.ts's own week-long Overpass-staleness window rather
-// than inventing a different one with no basis.
+// Same week-long window as tiles.ts's Overpass staleness.
 const SWEEP_STALE_MS = 7 * 24 * 60 * 60 * 1000
 const GEOHASH5_PATTERN = /^[0-9b-hj-km-np-z]{5}$/
-// API.md 1.6: "Tight limits on sweeps and chat" - a sweep launches a
-// real browser and scrapes Google, unlike a plain read, so this one
-// had nothing at all before.
+// A sweep launches a real browser and scrapes Google - tighter than a plain read.
 const SWEEP_RATE_LIMIT_MAX = 5
 const SWEEP_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
 
@@ -148,19 +144,14 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
       const allowed = await checkRateLimit(`sweep:user:${request.sessionUser!.id}`, SWEEP_RATE_LIMIT_MAX, SWEEP_RATE_LIMIT_WINDOW_SECONDS)
       if (!allowed) return reply.status(429).send({ error: "Too many sweeps - try again later" })
 
-      // "A tile swept recently returns 200 with an already-completed
-      // request" (API.md 2.4) - reusing tile_fetches' own (geohash,
-      // source) staleness tracking rather than a second table, same as
-      // tiles.ts does for Overpass.
+      // A recently-swept tile returns 200 with the already-completed
+      // request - reuses tile_fetches' own staleness tracking. Status-
+      // aware: a failed sweep only blocks a retry for a short backoff,
+      // not the full week a real completed sweep does.
       const [fetchRow] = await db
         .select()
         .from(tileFetches)
         .where(and(eq(tileFetches.geohash, geohash), eq(tileFetches.source, "google_maps")))
-      // status-aware: a failed sweep (Google blocked the scraper, a
-      // transient error) only blocks a retry for a short backoff, not
-      // the full week a real completed sweep does - this used to check
-      // only the date, so one failure made that cell permanently return
-      // the same failed request for 7 days.
       if (isFetchRowFresh(fetchRow, SWEEP_STALE_MS)) {
         const [recent] = await db
           .select()
@@ -169,9 +160,7 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
           .orderBy(desc(requests.id))
           .limit(1)
         if (recent) return serializeRequest(recent.id)
-        // No stored request to point at (e.g. this cell was last swept
-        // before sweeps produced one) - report from tile_fetches alone
-        // rather than fail; there's nothing new to find either way.
+        // No stored request to point at - report from tile_fetches alone.
         return {
           id: null,
           kind: "sweep",
@@ -184,9 +173,7 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
         }
       }
 
-      // "A tile already queued attaches to the existing job" - same
-      // dedup intent as tiles.ts's jobId, but a sweep has a `requests`
-      // row to attach to directly.
+      // A tile already queued attaches to the existing request row.
       const [pending] = await db
         .select()
         .from(requests)
