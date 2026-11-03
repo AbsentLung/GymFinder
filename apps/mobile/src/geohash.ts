@@ -1,16 +1,8 @@
-// Client-side mirror of apps/server/src/lib.ts's encodeGeohash/
-// geohash5TilesCoveringBbox, at precision 4 instead of 5 - the map
-// needs to work out which geohash4 tiles cover the current viewport
-// (API.md 2.2: "The app works out which geohash4 cells cover the
-// screen and requests them in parallel"). Not imported from the server
-// package (there's no shared package wired up between apps/mobile and
-// apps/server for this yet - packages/shared is still an empty
-// placeholder) - duplicated deliberately rather than standing up that
-// cross-package plumbing for one small, pure, already-tested algorithm.
-// The server-side version is confirmed correct against real PostGIS
-// output (encodeGeohash(-8.6501, 115.1385, 5) === "qw3yu", matching
-// ST_GeoHash exactly) - this is the identical algorithm, just stopped
-// one character earlier.
+// Client-side mirror of apps/server/src/lib.ts's geohash functions - no
+// shared package wired up yet, so duplicated rather than standing up
+// that plumbing for one small, pure algorithm. Confirmed against real
+// PostGIS output server-side (ST_GeoHash match); this is the same
+// algorithm, just stopped one character earlier for precision 4.
 const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 
 export interface Bbox {
@@ -87,35 +79,35 @@ function decodeGeohashBounds(geohash: string): Bbox {
   return { minLat, maxLat, minLng, maxLng };
 }
 
-// Grid-walks at HALF a tile's own span, not a full one - a thin sliver
-// near the viewport's edge would otherwise be silently skipped, since
-// the geohash grid isn't aligned to the viewport's own corner.
-// Oversampling is harmless (the Set dedupes).
+// Grid-walks at HALF a tile's own span so a thin edge sliver is never
+// skipped; oversampling is harmless (the Set dedupes). Samples up to
+// (not including) the max edge, then adds it explicitly - a `<=` loop
+// condition instead would usually stop short of the edge and skip the
+// whole top row except its one corner (same bug server-side lib.ts had).
 function tilesCoveringBbox(bbox: Bbox, precision: number): string[] {
   const sample = decodeGeohashBounds(encodeGeohash(bbox.minLat, bbox.minLng, precision));
   const latStep = (sample.maxLat - sample.minLat) / 2;
   const lngStep = (sample.maxLng - sample.minLng) / 2;
   const tiles = new Set<string>();
 
-  for (let lat = bbox.minLat; lat <= bbox.maxLat; lat += latStep) {
-    for (let lng = bbox.minLng; lng <= bbox.maxLng; lng += lngStep) {
-      tiles.add(encodeGeohash(lat, lng, precision));
-    }
-    tiles.add(encodeGeohash(lat, bbox.maxLng, precision));
-  }
-  tiles.add(encodeGeohash(bbox.maxLat, bbox.maxLng, precision));
+  const lats: number[] = [];
+  for (let lat = bbox.minLat; lat < bbox.maxLat; lat += latStep) lats.push(lat);
+  lats.push(bbox.maxLat);
+  const lngs: number[] = [];
+  for (let lng = bbox.minLng; lng < bbox.maxLng; lng += lngStep) lngs.push(lng);
+  lngs.push(bbox.maxLng);
+
+  for (const lat of lats) for (const lng of lngs) tiles.add(encodeGeohash(lat, lng, precision));
   return [...tiles];
 }
 
-// For GET /v1/tiles/{geohash4} - map data loading (API.md 2.2).
+// For GET /v1/tiles/{geohash4} - map data loading.
 export function geohash4TilesCoveringBbox(bbox: Bbox): string[] {
   return tilesCoveringBbox(bbox, 4);
 }
 
-// For POST /v1/sweeps - only a single geohash5 cell per request (API.md
-// 2.4's sweep scope cut), so "find more gyms" over a whole viewport
-// means one sweep per covering geohash5 cell, not one bbox call like
-// the old demo's /api/gyms/find-more.
+// For POST /v1/sweeps - one sweep per covering geohash5 cell, not one
+// bbox call.
 export function geohash5TilesCoveringBbox(bbox: Bbox): string[] {
   return tilesCoveringBbox(bbox, 5);
 }

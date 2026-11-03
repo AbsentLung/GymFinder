@@ -5,23 +5,13 @@ import { Pressable, StyleSheet, Text, TextInput, View, ScrollView } from 'react-
 import { API_BASE_URL } from '@/config';
 import { useAuth } from '@/auth-context';
 
-// Shared between gym-map-screen.web.tsx (Leaflet) and gym-map-screen.tsx
-// (a WebView wrapping the same Leaflet map, for native) - everything here
-// is plain React Native primitives (View/Text/Pressable/TextInput/
-// ScrollView) with no DOM/window dependency, so it was always safe to run
-// on native; it just used to live inside the web-only file by accident of
-// where the map screen was first built. Splitting it out means the chat/
-// reviews/edit/add-gym features don't need a second, parallel
-// implementation for native - one real bug fix here fixes both platforms.
+// Shared by both platforms' map screens - plain RN primitives, no
+// DOM/window dependency, so one fix here covers chat/reviews/edit/add-gym
+// on native and web alike.
 
-// The tile-shape gym (API.md 2.2, GET /v1/tiles/{geohash4}) - what the map
-// has for every pin on screen. Deliberately lightweight: description is
-// truncated, there's no trial/openingHours/amenities text, and only the
-// day-pass price is included (week/month only show up once a gym's full
-// details are fetched - see GymDetails below). osm_id, week/month pass
-// price, suggested-price and trial-day-count fields from the old demo's
-// Gym type don't exist in the new API at all; dropped rather than kept
-// as always-null placeholders.
+// The tile-shape gym (GET /v1/tiles/{geohash4}) - lightweight: truncated
+// description, no trial/openingHours text, only the day-pass price
+// (week/month show up once full details load - see GymDetails).
 export interface DayPass {
   amountMinor: number;
   currency: string;
@@ -84,13 +74,9 @@ export interface GymRequest {
   changes: { id: string; reviewStatus: 'pending_bot' | 'awaiting_admin' | 'approved' | 'rejected'; reason: string | null }[];
 }
 
-// Add-gym and edit-request are both async now (202 + poll), not the old
-// demo's synchronous "scrape and decide in this one HTTP call" - bot
-// review genuinely searches the web, which isn't instant. Short,
-// fixed-interval polling (no backoff) is fine here: these requests
-// almost always resolve in single-digit seconds against a real LLM, and
-// a form the user is actively watching isn't the same cost/patience
-// tradeoff as a background "My requests" list poll would be.
+// Add-gym/edit-request are async now (202 + poll) since bot review
+// actually searches the web. Fixed-interval, no backoff - fine while the
+// user's actively watching this form.
 const REQUEST_POLL_MS = 2000;
 const REQUEST_POLL_TIMEOUT_MS = 60000;
 
@@ -111,35 +97,27 @@ export async function pollRequest(
   }
 }
 
-// Live map-search filter, shared so both platforms match on the exact
-// same fields - name, description, address, and categories, not just
-// name, per explicit request. Plain case-insensitive substring, not a
-// fuzzy/ranked search: this filters which markers are even on screen,
-// so "obviously matches or doesn't" beats a relevance score here.
+// Shared search filter - matches name, description, address, categories.
+// Plain substring match, not fuzzy/ranked: this just decides which
+// markers show on screen.
 export function gymMatchesSearch(gym: Gym, normalizedQuery: string): boolean {
   if (!normalizedQuery) return true;
   const haystack = [gym.name, gym.description, gym.address, ...gym.categories].filter(Boolean).join(' ').toLowerCase();
   return haystack.includes(normalizedQuery);
 }
 
-// Mirrors GYM_CATEGORIES in apps/server/src/lib.ts exactly - a fixed,
-// generic list rather than whatever free-text phrase a scrape happened
-// to produce, per explicit request. A gym can have several at once, not
-// just one.
+// Mirrors GYM_CATEGORIES in apps/server/src/lib.ts. A gym can have several.
 export const GYM_CATEGORIES = [
   'Traditional', 'Group', 'Yoga', 'Bouldering', 'Swimming', 'Luxury', 'MMA', '24hr', 'Outdoor', 'Sports',
   'CrossFit', 'Hyrox', 'HIIT', 'Personal Trainer', 'Pilates',
 ];
 
-// A gym with zero categories on file still needs to be representable as
-// one of the category filter's own checkboxes - this stands in for
-// `categories.length === 0` there, never a real category value.
+// Stands in for `categories.length === 0` in the category filter UI -
+// never a real category value.
 export const UNKNOWN_CATEGORY = '__unknown__';
 
-// Manual symbol/decimals table, not Intl.NumberFormat's style: 'currency'
-// - that depends on the JS engine shipping full ICU currency data, and
-// this app's web bundle runs on Hermes, which doesn't reliably support
-// that for less-common codes.
+// Manual symbol/decimals table - Intl.NumberFormat's currency style needs
+// full ICU data this app's Hermes bundle doesn't reliably ship.
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', THB: '฿', IDR: 'Rp', VND: '₫', PHP: '₱', MYR: 'RM', SGD: 'S$',
   JPY: '¥', KRW: '₩', CNY: '¥', INR: '₹', EUR: '€', GBP: '£', AUD: 'A$',
@@ -147,27 +125,14 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 };
 
 // Mirrors apps/server/src/lib.ts's ZERO_DECIMAL_CURRENCIES/
-// amountMinorToMajor exactly (confirmed there against a real API.md
-// example: 150000 IDR amountMinor -> 950 usdCents only works out to a
-// realistic price if 150000 IS the whole-Rupiah amount, not IDR-cents).
-// Not shared cross-package (no packages/shared plumbing exists for
-// this yet) - duplicated rather than standing up that wiring for one
-// small, already-proven-correct pure function.
+// amountMinorToMajor - duplicated, no shared package wired up yet.
 const ZERO_DECIMAL_CURRENCIES = new Set(['IDR', 'JPY', 'KRW', 'VND', 'KHR', 'LAK', 'MMK']);
 function amountMinorToMajor(amountMinor: number, currency: string): number {
   return ZERO_DECIMAL_CURRENCIES.has(currency) ? amountMinor : amountMinor / 100;
 }
 
-// Flipped from "most currencies get 2 decimals, a few exceptions get 0"
-// to "most get 0, decimals only survive where a single unit is worth
-// real money" - gym prices in THB/IDR/etc. are never actually quoted
-// down to a fractional unit, decimals there read as fake precision, not
-// accuracy. Driven off the price's own usdCents (no separate FX fetch
-// needed anymore - the server already returns each price in its own
-// real local currency, API.md 2.2/2.3), not a hardcoded currency list,
-// so any currency qualifies the same way: 1 unit has to be worth at
-// least 20 cents USD for a decimal of it to mean anything for a gym
-// day-pass price.
+// Decimals only shown where a single unit is worth real money - driven
+// off the price's own usdCents, not a hardcoded currency list.
 const MIN_UNIT_VALUE_USD_FOR_DECIMALS = 0.2;
 
 export function formatPrice(price: { amountMinor: number; currency: string; usdCents: number } | null | undefined): string | null {
@@ -179,40 +144,26 @@ export function formatPrice(price: { amountMinor: number; currency: string; usdC
   return `${symbol}${amountMajor.toFixed(decimals)}`;
 }
 
-// Derived, not a stored field on the tile shape: a day-pass price
-// implies drop-ins are accepted. This loses the ability to say
-// "confirmed yes, price unknown" as distinct from "unknown either way"
-// - a deliberate tradeoff, not an oversight. No price means "not
-// known," never "no." acceptsDropIn is an explicit override, not the
-// default - most gyms are NULL here, meaning "use the derived
-// assumption below." `prices` (only present once a gym's full details
-// are loaded - GymDetails, not the tile-level Gym) restores the old
-// demo's week/month-pass-also-counts behavior when it's available;
-// falls back to just dayPass on the map's tile-level pins.
+// Derived: a day-pass (or any loaded) price implies drop-ins are
+// accepted. acceptsDropIn is an explicit override; most gyms are NULL,
+// meaning "use this derived guess." No price means "not known," never
+// "no."
 export function acceptsDropIn(gym: { acceptsDropIn: boolean | null; dayPass: DayPass | null; prices?: PriceEntry[] }): boolean {
   if (gym.acceptsDropIn != null) return gym.acceptsDropIn;
   if (gym.dayPass != null) return true;
   return (gym.prices ?? []).length > 0;
 }
 
-// DayPass (the tile shape) and PriceEntry (the full-details shape)
-// carry the same "verified or not" fact under different names -
-// DayPass.verified is already a boolean the tiles route computed
-// server-side, PriceEntry.verifiedBy is the raw "bot" | "admin" | null.
-// One place to check, since the detail panel reads week/month pass
-// from `prices` but day pass from either shape depending on whether
-// full details have loaded yet.
+// DayPass.verified (precomputed boolean) and PriceEntry.verifiedBy
+// (raw "bot" | "admin" | null) carry the same fact under different
+// names - one place to check either shape.
 export function isPriceVerified(price: DayPass | PriceEntry): boolean {
   return 'verified' in price ? price.verified : price.verifiedBy != null;
 }
 
 export function TrialSection({ gym }: { gym: GymDetails }) {
   const [expanded, setExpanded] = useState(false);
-  // null = never researched - hide the row entirely, same as the old
-  // demo's trial_days == null case. Unlike that version, there's no
-  // numeric day-count in the new schema (gyms.has_trial is a plain
-  // boolean, not a day count) - a deliberate simplification, disclosed
-  // rather than silently dropped.
+  // null = never researched - hide the row entirely.
   if (gym.trial.available == null) return null;
   return (
     <View style={panelStyles.panelRow}>
@@ -239,10 +190,8 @@ interface Review {
 
 const RATINGS = [1, 2, 3, 4, 5];
 
-// One review per signed-in user per gym now (API.md decision #9) - no
-// more free-text "author" name; POST uses the signed-in user's own
-// name, and PUT .../reviews/mine is the new "Edit" button this adds
-// for the reviewer's own review.
+// One review per signed-in user per gym (API.md decision #9) - POST
+// uses the signed-in user's name; PUT .../reviews/mine is the Edit button.
 export function ReviewsSection({ gym }: { gym: Gym }) {
   const { user, authHeaders } = useAuth();
   const [expanded, setExpanded] = useState(false);
@@ -327,7 +276,7 @@ export function ReviewsSection({ gym }: { gym: Gym }) {
               <TextInput
                 style={[panelStyles.input, panelStyles.textarea]}
                 placeholder="How was it?"
-                placeholderTextColor="#9AA3AB"
+                placeholderTextColor={PLACEHOLDER_COLOR}
                 value={body}
                 onChangeText={setBody}
                 multiline
@@ -364,27 +313,17 @@ interface ChatMessage {
   text: string;
 }
 
-// Per-gym chat history, kept only for this JS session - module-level, not
-// component state, specifically so it survives the panel closing and
-// reopening (ChatSection remounts fresh each time via its `key` prop) but
-// vanishes the moment the app itself closes, per explicit request: "keep
-// it in memory until they close the app, no hard database storing."
+// Per-gym chat history, module-level (not component state) so it
+// survives the panel closing/reopening but vanishes when the app closes
+// - no database storage, per explicit request.
 const chatHistoryCache = new Map<number, ChatMessage[]>();
 const CHAT_POLL_MS = 1000;
 const CHAT_POLL_TIMEOUT_MS = 30000;
 
-// Answers are grounded server-side in whatever's actually on file for
-// this gym (description, pricing, reviews), plus live web research the
-// server triggers when something's still missing - the model's told to
-// say it doesn't know rather than guess at anything not covered
-// otherwise. Async now (202 + poll GET /v1/chats/{chatId}), not the old
-// demo's synchronous reply - and a fact the bot finds along the way no
-// longer updates this gym's visible info immediately the way the old
-// demo's onGymUpdated did: it becomes a gym_changes row and goes
-// through the same bot-review/admin pipeline as every other source
-// (FR-9), so it genuinely isn't live yet by the time an answer comes
-// back. Expanded by default, unlike Trial/Reviews above - this is the
-// thing most worth a traveler's immediate attention.
+// Async (202 + poll GET /v1/chats/{chatId}). A fact the bot finds along
+// the way doesn't update this gym live - it becomes a gym_changes row
+// through the normal bot-review/admin pipeline (FR-9). Expanded by
+// default, unlike Trial/Reviews above.
 export function ChatSection({ gym }: { gym: Pick<Gym, 'id'> }) {
   const [expanded, setExpanded] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>(() => chatHistoryCache.get(gym.id) ?? []);
@@ -453,15 +392,11 @@ export function ChatSection({ gym }: { gym: Pick<Gym, 'id'> }) {
               value={input}
               onChangeText={setInput}
               placeholder="Ask about pricing, trials, hours, or anything else that isn't display here. Our bot will do the research for you."
-              placeholderTextColor="#9AA3AB"
+              placeholderTextColor={PLACEHOLDER_COLOR}
               multiline
               onSubmitEditing={send}
-              // onSubmitEditing above never actually fires on web - RN
-              // Web's multiline TextInput renders a real <textarea>, where
-              // Enter just inserts a newline like any textarea. Shift+Enter
-              // still does that; plain Enter submits instead. Native
-              // TextInput does fire onSubmitEditing normally, so this
-              // listener is harmless there (web-only nativeEvent shape).
+              // onSubmitEditing doesn't fire on web's <textarea>; plain
+              // Enter submits here instead, Shift+Enter still newlines.
               onKeyPress={(e) => {
                 const { key, shiftKey } = e.nativeEvent as unknown as { key?: string; shiftKey?: boolean };
                 if (key === 'Enter' && !shiftKey) {
@@ -483,10 +418,9 @@ export function ChatSection({ gym }: { gym: Pick<Gym, 'id'> }) {
   );
 }
 
-// Deliberately minimal: only the name is ever collected here. Address and
-// description get filled in by the bot from Google's own listing once it
-// confirms a match. Everything else - pricing, trial, drop-in - only
-// arrives later through an edit request, not at creation.
+// Deliberately minimal: only name is collected here. Address/description
+// get filled in by the bot from Google's listing; everything else
+// arrives later through an edit request.
 export function SubmitGymForm({
   location,
   onSubmitted,
@@ -528,18 +462,8 @@ export function SubmitGymForm({
       const final = await pollRequest(created.id, authHeaders);
       const change = final.changes[0];
       setResult({ approved: change?.reviewStatus === 'approved', reason: change?.reason ?? null });
-      // Merge the new pin into live state the moment we know about it -
-      // not deferred until the user clicks a specific "Done" button. The
-      // panel also has its own "✕" close button; closing via that instead
-      // of Done used to silently drop an already-created gym from view
-      // until a full page refresh, since only Done used to carry this
-      // merge. Decoupling it from any particular button closes that gap
-      // regardless of how the panel gets dismissed.
-      // No optimistic gym object here, unlike the old demo's version:
-      // the server doesn't hand back a gym id for an add-gym request at
-      // all (API.md 2.4 - the response is the request/changes shape, not
-      // the resulting gym), so there's nothing to merge yet. The next
-      // tile fetch picks it up once (and if) it's actually approved.
+      // No optimistic gym object - the server doesn't return a gym id
+      // for add-gym (API.md 2.4). Next tile fetch picks it up if approved.
       onSubmitted(null);
     } catch (e) {
       console.error('Failed to submit gym', e);
@@ -589,16 +513,9 @@ export function SubmitGymForm({
 }
 
 // Mirrors apps/server/src/jobs/bot-review.ts's NON_PRICE_FIELDS plus the
-// three price kinds - the client-side rendering of the same whitelist.
-// "name" and "status" aren't offered here even though the server
-// supports editing them (name wasn't in the old demo's editable-field
-// list either, and status - closing/removing a gym - was never an edit
-// option in this UI; adding either would be new UI surface beyond
-// "keep the UI exactly as is"). Trial DETAILS text also isn't offered -
-// the server's own field whitelist only covers the hasTrial boolean,
-// not the free-text details (which lives inside gyms.details, a jsonb
-// catch-all the generic field-update path doesn't reach) - a known,
-// disclosed gap, not silently dropped.
+// three price kinds. "name"/"status" aren't offered (no new UI surface);
+// trial DETAILS text isn't either - only the hasTrial boolean is in the
+// server's field whitelist.
 export const EDITABLE_FIELDS: { key: string; label: string; kind: 'price' | 'text' | 'category' | 'boolean' }[] = [
   { key: 'day_pass', label: 'Day pass price (USD)', kind: 'price' },
   { key: 'week_pass', label: 'Week pass price (USD)', kind: 'price' },
@@ -623,12 +540,8 @@ export function SuggestEditForm({
   const { user, authHeaders } = useAuth();
   const [fieldKey, setFieldKey] = useState(EDITABLE_FIELDS[0].key);
   const [value, setValue] = useState('');
-  // categories is the one field where the new value is a SET, not a
-  // single pick like the old demo's category chip - the server replaces
-  // the gym's whole categories array with whatever's submitted here
-  // (not an add-one-tag merge), so this has to start pre-populated with
-  // the gym's current categories or an edit would silently wipe the
-  // rest.
+  // categories submits a whole replacement SET, not an add-one-tag merge
+  // - pre-populate with current categories or an edit would wipe the rest.
   const [selectedCategories, setSelectedCategories] = useState<string[]>(gym.categories);
   const [boolValue, setBoolValue] = useState(true);
   const [description, setDescription] = useState('');
@@ -794,16 +707,23 @@ export function SuggestEditForm({
 }
 
 // Shared visual language for the detail panel - used both by the
-// components above and directly by each platform's own MapScreen (for
-// the rows it renders itself: rating/category/description/address/
-// pricing/coordinates). cursor/boxShadow are harmless on native (React
-// Native silently ignores style keys it doesn't recognize).
+// components above and directly by each platform's MapScreen. cursor is
+// harmless on native (RN ignores unrecognized style keys).
+const ACCENT = '#146C5F';
+const TEXT = '#1C2430';
+const TEXT_MUTED = '#8A94A0';
+const TEXT_DIM = '#5B6470';
+const BORDER = '#DDE2E6';
+const GOLD = '#E0A500';
+const BG_MUTED = '#F7F8F9';
+export const PLACEHOLDER_COLOR = '#9AA3AB';
+
 export const panelStyles = StyleSheet.create({
   panelScroll: { flex: 1 },
   panelScrollContent: { padding: 20, gap: 20 },
   panelRow: { gap: 8 },
-  panelLabel: { fontSize: 11, fontWeight: '600', color: '#8A94A0', textTransform: 'uppercase', letterSpacing: 0.5 },
-  panelValue: { fontSize: 14, color: '#1C2430', lineHeight: 20 },
+  panelLabel: { fontSize: 11, fontWeight: '600', color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: 0.5 },
+  panelValue: { fontSize: 14, color: TEXT, lineHeight: 20 },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -811,17 +731,17 @@ export const panelStyles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  sectionChevron: { fontSize: 12, color: '#8A94A0' },
+  sectionChevron: { fontSize: 12, color: TEXT_MUTED },
   sectionHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   reviewForm: {
     gap: 8,
-    backgroundColor: '#F7F8F9',
+    backgroundColor: BG_MUTED,
     borderRadius: 10,
     padding: 12,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#DDE2E6',
+    borderColor: BORDER,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -833,10 +753,10 @@ export const panelStyles = StyleSheet.create({
   // @ts-expect-error - web-only cursor hint, fine for the demo
   starHit: { cursor: 'pointer', padding: 2 },
   star: { fontSize: 18, color: '#D7DBDF' },
-  starFilled: { color: '#E0A500' },
-  editLink: { color: '#146C5F', fontSize: 12, fontWeight: '700' },
+  starFilled: { color: GOLD },
+  editLink: { color: ACCENT, fontSize: 12, fontWeight: '700' },
   submitButton: {
-    backgroundColor: '#146C5F',
+    backgroundColor: ACCENT,
     borderRadius: 8,
     paddingVertical: 9,
     alignItems: 'center',
@@ -850,21 +770,21 @@ export const panelStyles = StyleSheet.create({
     borderTopColor: '#EFEFEF',
   },
   reviewCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  reviewAuthor: { fontSize: 13, fontWeight: '700', color: '#1C2430' },
-  reviewStars: { fontSize: 12, color: '#E0A500' },
+  reviewAuthor: { fontSize: 13, fontWeight: '700', color: TEXT },
+  reviewStars: { fontSize: 12, color: GOLD },
   chatBox: { gap: 8 },
   chatBubble: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' },
-  chatBubbleUser: { backgroundColor: '#146C5F', alignSelf: 'flex-end' },
-  chatBubbleAssistant: { backgroundColor: '#F7F8F9', alignSelf: 'flex-start' },
+  chatBubbleUser: { backgroundColor: ACCENT, alignSelf: 'flex-end' },
+  chatBubbleAssistant: { backgroundColor: BG_MUTED, alignSelf: 'flex-start' },
   chatBubbleUserText: { color: 'white', fontSize: 13, lineHeight: 18 },
-  chatBubbleAssistantText: { color: '#1C2430', fontSize: 13, lineHeight: 18 },
+  chatBubbleAssistantText: { color: TEXT, fontSize: 13, lineHeight: 18 },
   chatInputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
   chatInput: { flex: 1 },
   chatInputLarge: { minHeight: 72, textAlignVertical: 'top' },
   chatSendButton: { paddingHorizontal: 16 },
   editFieldPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  editFieldChip: { borderWidth: 1, borderColor: '#DDE2E6', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
-  editFieldChipActive: { backgroundColor: '#146C5F', borderColor: '#146C5F' },
-  editFieldChipText: { fontSize: 12, color: '#5B6470', fontWeight: '600' },
+  editFieldChip: { borderWidth: 1, borderColor: BORDER, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
+  editFieldChipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
+  editFieldChipText: { fontSize: 12, color: TEXT_DIM, fontWeight: '600' },
   editFieldChipTextActive: { color: 'white' },
 });
