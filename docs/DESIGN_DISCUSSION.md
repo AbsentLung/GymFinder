@@ -561,7 +561,7 @@ sequenceDiagram
     Note over App: filters (drop-in, trial, category, text)<br/>applied on loaded tiles client-side,<br/>or as query params when tile data is large
 ```
 
-This also answers the open question in `docs/gym-data-design.md`: a stale tile is served immediately and refreshed in the background, so no user waits on Overpass.
+This also answers the open question in [gym-data-design.md](./gym-data-design.md): a stale tile is served immediately and refreshed in the background, so no user waits on Overpass.
 
 **Pluggable data sources (FR-11, OOS-1).** Sweeps, the coverage job and the weekly refresh all call the same interface. Choosing a source is config, so the Google Maps scraper, Google Places API, Foursquare, or regional sources can be added or swapped without changing anything else.
 

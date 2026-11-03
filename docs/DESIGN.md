@@ -10,7 +10,7 @@ This page is the short overview. Each section links to the detailed doc where th
 | [DESIGN_DISCUSSION.md](./DESIGN_DISCUSSION.md) | Architecture options, database, caching and queues |
 | [STACK_AND_SCHEMA.md](./STACK_AND_SCHEMA.md) | Tools, AWS hosting, database schema |
 | [API.md](./API.md) | REST endpoints, the contract the app and server build against |
-| [CLAUDE.md](./CLAUDE.md) | The same decisions as rules for Claude sessions |
+| [CLAUDE.md](../CLAUDE.md) | The same decisions as rules for Claude sessions |
 
 ---
 
