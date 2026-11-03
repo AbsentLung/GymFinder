@@ -40,7 +40,7 @@ Each requirement has an ID so later docs (`DESIGN.md`, PRs, tests) can point at 
 
 ### Area sweeps by bot
 
-- **FR-11** Beyond free data sources, a user can request that a bot sweeps an area on Google Maps to find gyms that are missing from the map.
+- **FR-11** Beyond free data sources, a user can request that a bot sweeps an area on Google Maps to find gyms that are missing from the map. This does not require an account (Joey, 2026-11-03).
 - **FR-12** Gyms found by a sweep go through the same approval flow as user submissions (FR-16, FR-17).
 - **FR-22** If the user is signed in, each sweep request and its status (pending, completed, failed) is saved, and shown on the same page as their add/update gym requests (FR-18).
 - **FR-23** Users are told when their sweep request fails.
@@ -49,7 +49,7 @@ Each requirement has an ID so later docs (`DESIGN.md`, PRs, tests) can point at 
 
 - **FR-13** Users can sign up, log in, and log out.
 - **FR-14** Some users are recognized as admins.
-- **FR-15** Browsing the map and viewing gym details do not require an account. Submitting or requesting changes does.
+- **FR-15** Browsing the map and viewing gym details do not require an account. Submitting or requesting changes does. Requesting a sweep ("Find more gyms", FR-11) does not.
 
 ### Adding and updating gyms
 

@@ -26,6 +26,7 @@ These were agreed with Joey. Follow them unless he changes them; update this fil
 - Fetch gyms from the Overpass API (`leisure=fitness_centre`) and merge them with user-submitted gyms.
 - Postgres + PostGIS is the source of truth: gyms, user-submitted gyms, and `last_fetched` per area.
 - The app calls our backend, not Overpass directly.
+- "Find more gyms" (sweeps) works without sign-in (Joey, 2026-11-03); rate limit it per IP when signed out.
 
 ### Caching and loading
 - Split the map into fixed geohash4 cells (~39 × 20 km) for loading and caching; Overpass refreshes and sweeps use geohash5 cells inside them. Load the cells on screen as the user pans/zooms, only at zoom 11 and above (same as `FILTERS_VISIBLE_AT_ZOOM = 11` in the vibe-coded map). Below zoom 11: no tile requests, nothing cached, no gym pins, no filters.
