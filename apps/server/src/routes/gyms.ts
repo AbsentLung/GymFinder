@@ -1,8 +1,5 @@
-// API.md 2.3 - full gym details and reviews. Separate from
-// src/routes/tiles.ts's map-tile shape (truncated, filter-only fields):
-// this is the "tap a pin" detail panel's full response, plus the
-// reviews list/write endpoints the vibe-coded UI's reviews section and
-// new "Edit" button (API.md decision #9) need.
+// Full gym details and reviews - the "tap a pin" detail panel's
+// response, separate from tiles.ts's truncated map-tile shape.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
 import { sql, eq, and, desc, lt } from "drizzle-orm"
@@ -40,10 +37,8 @@ async function fetchGymDetail(id: number) {
   if (!gym) return null
 
   const prices = await db.select().from(gymPrices).where(eq(gymPrices.gymId, id))
-  // trialDetails/openingHours are promoted to their own top-level
-  // fields (per API.md's own example response) - `details` carries
-  // whatever's left of the jsonb catch-all (amenities, website, ...),
-  // not a duplicate copy of the same two facts under two names.
+  // trialDetails/openingHours promoted to top-level fields; `details`
+  // carries whatever's left of the jsonb catch-all.
   const { trialDetails, openingHours, ...restDetails } = (gym.details ?? {}) as Record<string, unknown>
 
   return {
@@ -70,13 +65,8 @@ async function fetchGymDetail(id: number) {
     rating: gym.rating,
     reviewCount: gym.review_count,
     status: gym.status,
-    // db.execute's raw-SQL escape hatch returns a timestamptz column as
-    // the driver's plain string ("2026-11-02 10:02:02.627-05"), not a
-    // parsed Date the way Drizzle's typed query builder does (confirmed
-    // live - gymPrices.lastSeenAt above, read via .select(), serializes
-    // to real ISO 8601 automatically; this raw-SQL field didn't) -
-    // reparsed explicitly so every timestamp in this response uses the
-    // same format.
+    // Raw SQL returns timestamptz as a plain driver string, not a
+    // parsed Date - reparsed so every timestamp here is real ISO 8601.
     updatedAt: new Date(gym.updated_at).toISOString(),
   }
 }
