@@ -1,16 +1,6 @@
-// Ported from server/ai.js - the research tools bot-review verification
-// (src/jobs/bot-review.ts) needs, plus real chat (API.md 2.4b) and
-// sweeps later. Deliberately NOT using Anthropic's hosted
-// `web_search_20250305` tool the old demo declared for its Claude path:
-// that tool runs server-side on Anthropic's infrastructure and has no
-// equivalent for Ollama at all, and the old code's own interception
-// logic already assumed every tool resolves client-side (its
-// INTERCEPTED_TOOL_NAMES/runIntercepted dispatch treats "web_search" as
-// a plain tool_use block, which the hosted tool wouldn't even produce).
-// Running our own DuckDuckGo-backed search tool identically on both
-// providers keeps verification behavior the same regardless of
-// AI_PROVIDER/MODE, matching this app's own mode-agnostic-business-logic
-// rule, and avoids a second, metered search path to maintain.
+// Research tools for bot-review verification, chat, and sweeps. Not
+// using Anthropic's hosted web_search tool - no Ollama equivalent, and
+// our own DuckDuckGo-backed search keeps behavior identical on both providers.
 import { chromium } from "playwright"
 import type { ToolDef } from "../interfaces/llm.js"
 
@@ -39,10 +29,9 @@ export interface SearchResult {
   snippet: string
 }
 
-// Scrapes DuckDuckGo's plain-HTML results page (built for non-JS
-// clients, no API key needed). result__a and result__snippet links
-// always alternate in document order, so a lazy match correctly pairs
-// each title with its own snippet.
+// Scrapes DuckDuckGo's plain-HTML results page (no API key needed).
+// result__a/result__snippet links alternate in document order, so a
+// lazy match pairs each title with its own snippet.
 export async function searchDuckDuckGo(query: string, maxResults = 3): Promise<SearchResult[]> {
   try {
     const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
@@ -77,10 +66,8 @@ function htmlToReadableText(html: string): string {
     .trim()
 }
 
-// 15000, confirmed against a real gym's own single-page site
-// (somafightclub.com, ~9600 chars) whose actual price list sat well
-// past an earlier, smaller cap - see server/ai.js's original comment
-// for the live-caught truncation bug this value fixes.
+// Confirmed against a real single-page gym site whose price list sat
+// well past an earlier, smaller cap.
 const FETCH_URL_MAX_CHARS = 15000
 const PRICING_LINK_PATTERN = /member|pricing|price|rates?|join|plans|fees?|cost/i
 
@@ -100,8 +87,8 @@ function findPricingLink(html: string, baseUrl: string): string | null {
   return null
 }
 
-// followPricingLink defaults true but is passed false on the recursive
-// call - caps this at exactly one extra hop, never a real crawl.
+// followPricingLink is false on the recursive call - caps this at one
+// extra hop, never a real crawl.
 export async function fetchUrl(url: string, followPricingLink = true): Promise<string> {
   try {
     const res = await fetch(url, { headers: { "User-Agent": "GymFinder/1.0 (bot-review verification)" }, redirect: "follow" })
@@ -146,10 +133,8 @@ export const FETCH_URL_TOOL: ToolDef = {
 }
 
 // Finds a business's own official website via its Google Maps listing.
-// data-item-id="authority" confirmed live (Soma Fight Club ->
-// somafightclub.com) before trusting this selector. Deliberately does
-// NOT read Google Maps reviews - Google serves automated browsers a
-// stripped "limited view" with no reviews tab at all.
+// Doesn't read reviews - Google serves automated browsers a stripped
+// view with no reviews tab.
 async function findWebsiteOnGoogleMaps(name: string, location: string): Promise<string> {
   const browser = await chromium.launch()
   try {
@@ -188,10 +173,8 @@ export const GOOGLE_MAPS_WEBSITE_TOOL: ToolDef = {
   },
 }
 
-// Resolved internally by the agent-turn loop in every LLM implementation
-// (src/llm/claude-llm.ts, src/llm/ollama-llm.ts), never handed back to
-// the caller as a "finding" to dispatch - unlike a caller-defined tool
-// (confirm_price_finding etc.), which only the caller knows how to act on.
+// Resolved internally by each LLM implementation's agent-turn loop,
+// never handed back to the caller as a finding to dispatch.
 export const INTERCEPTED_TOOL_NAMES = new Set(["web_search", "fetch_url", "find_website_on_google_maps"])
 
 export async function runIntercepted(name: string, input: Record<string, unknown>): Promise<unknown> {

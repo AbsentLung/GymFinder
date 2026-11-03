@@ -1,8 +1,5 @@
-// Queue job handler for "bot-review" (enqueued by src/routes/requests.ts
-// right after a request/gym_changes row is created - "anything that
-// goes through a queue... can't answer in the same request", API.md
-// 1.3). Runs every gym_changes row still pending_bot for one request
-// through verifyGymChange and records the outcome.
+// Queue job handler for "bot-review" - runs every gym_changes row still
+// pending_bot for one request through verifyGymChange and records the outcome.
 import { eq, and } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges } from "../db/schema.js"

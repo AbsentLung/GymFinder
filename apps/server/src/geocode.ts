@@ -1,18 +1,9 @@
-// Ported from server/index.js's reverseGeocode - the bot-review
-// verification prompt (src/jobs/bot-review.ts) needs a human-readable
-// location to fold into its search query, since a gym name alone is
-// often not unique worldwide (e.g. "Power Gym"). CLAUDE.md: Photon only
-// - never the public Nominatim server, even as a fallback, even in
-// MODE=demo (a real production tier, not "dev" - see that file's own
-// MODE vs NODE_ENV note).
+// CLAUDE.md: Photon only - never the public Nominatim server, not even
+// as a fallback.
 //
-// Two distinct failure shapes, kept distinct rather than both
-// collapsing to null: a plain Photon outage shouldn't be treated the
-// same as "this coordinate resolves to nowhere real".
-// - GeocoderUnavailableError: Photon didn't answer (network error, 5xx,
-//   timeout) - callers should NOT treat this as "no location here".
-// - null: Photon answered and genuinely found nothing at this point -
-//   the real "likely in the sea" signal FR-26 means.
+// GeocoderUnavailableError (Photon didn't answer) is kept distinct from
+// a plain null (Photon answered, found nothing - the "likely in the
+// sea" signal FR-26 means) - an outage isn't evidence of anything.
 export class GeocoderUnavailableError extends Error {}
 
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
@@ -29,11 +20,8 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
   return p ? [p.city || p.district, p.state, p.country].filter(Boolean).join(", ") : null
 }
 
-// For callers that only use the location as an optional search-query
-// hint (verifyFieldChangeForGym, verifyPriceChange) - an outage there
-// just means a slightly less specific search, not a reason to fail the
-// whole operation, so it collapses to null same as "genuinely no
-// location" would.
+// For hint-only callers (a search-query location, not a decision input)
+// - an outage there just means a less specific search.
 export async function tryReverseGeocode(lat: number, lng: number): Promise<string | null> {
   try {
     return await reverseGeocode(lat, lng)

@@ -1,10 +1,7 @@
-// POST /v1/sweeps is deliberately NOT here yet (FR-11) - a separate
-// slice per the original "modules split so they can be built in
-// parallel" plan (STACK_AND_SCHEMA.md 1.2). This covers API.md 2.4's
-// add-gym/update-gym requests, 2.4's shared status/retry endpoints, and
-// 2.5's "My requests" listing - the add-gym and update-gym routes share
-// almost everything (one request + one gym_changes row, then a queued
-// bot-review job), so building them together was the natural cut.
+// Add-gym/update-gym requests, shared status/retry endpoints, and "My
+// requests" listing - add-gym and update-gym share almost everything
+// (one request + one gym_changes row, then a queued bot-review job).
+// POST /v1/sweeps is a separate slice, not here yet.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
 import { and, desc, eq, lt, sql } from "drizzle-orm"
@@ -94,9 +91,8 @@ async function createRequest(userId: number, kind: "add_gym" | "update_gym", inp
   await db.insert(gymChanges).values({ requestId: request.id, gymId, proposed })
 
   // A price change is visible the moment it's submitted, unlike every
-  // other change kind - STACK_AND_SCHEMA.md 2.6: "An unverified price is
-  // stored straight away... so users see it at once, clearly marked
-  // unverified," independent of whatever gym_changes/bot review decides.
+  // other kind - stored straight away as unverified, independent of
+  // whatever bot review decides.
   if (proposed.kind === "price" && gymId) {
     const rates = proposed.currency === "USD" ? {} : await getFxRates()
     const usdCents = convertToUsdCents(amountMinorToMajor(proposed.amountMinor, proposed.currency), proposed.currency, rates)

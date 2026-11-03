@@ -79,11 +79,8 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
       if (change.reviewStatus === "approved" || change.reviewStatus === "rejected") {
         return reply.status(409).send({ error: "Already decided" })
       }
-      // Same `reason` key the bot's own evidence uses (src/jobs/bot-review.ts)
-      // - serializeRequest (src/routes/requests.ts) reads it as THE
-      // reason shown to the user, so an admin's stated reason has to
-      // replace the bot's now-moot one, not sit alongside it under a
-      // different key no one reads.
+      // Same `reason` key the bot's own evidence uses - serializeRequest
+      // reads it as THE reason shown to the user.
       await applyDecision(change.id, { reviewStatus: "rejected", decidedBy: "admin", evidence: { reason: request.body.reason } })
       return { ok: true }
     }

@@ -1,8 +1,6 @@
-// Session reading for 🔒/🛡️ routes (API.md's per-route access markers).
-// Deliberately uses `fromNodeHeaders` only, never `toNodeHandler` - the
-// same reasoning as src/routes/auth.ts: fromNodeHeaders just converts
-// headers, it never touches the request body stream Fastify has already
-// drained, so it's safe to use outside the auth.handler passthrough.
+// Session reading for 🔒/🛡️ routes. Uses `fromNodeHeaders` only (never
+// `toNodeHandler`) - it just converts headers, so it's safe outside the
+// auth.handler passthrough.
 import type { FastifyRequest, FastifyReply } from "fastify"
 import { fromNodeHeaders } from "better-auth/node"
 import { auth } from "./auth.js"
