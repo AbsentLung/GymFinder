@@ -295,12 +295,18 @@ export function geohash5TilesCoveringBbox(bbox: Bbox): string[] {
   const lngStep = (sample.maxLng - sample.minLng) / 2
   const tiles = new Set<string>()
 
-  for (let lat = bbox.minLat; lat <= bbox.maxLat; lat += latStep) {
-    for (let lng = bbox.minLng; lng <= bbox.maxLng; lng += lngStep) {
-      tiles.add(encodeGeohash(lat, lng, 5))
-    }
-    tiles.add(encodeGeohash(lat, bbox.maxLng, 5))
-  }
-  tiles.add(encodeGeohash(bbox.maxLat, bbox.maxLng, 5))
+  // Sample every row/column up to (not including) the max edge, then
+  // add the max edge itself explicitly - a `<= maxLat` loop condition
+  // instead would usually stop short of maxLat (the step rarely divides
+  // the range evenly), silently skipping the whole top row of tiles
+  // except the one corner added below.
+  const lats: number[] = []
+  for (let lat = bbox.minLat; lat < bbox.maxLat; lat += latStep) lats.push(lat)
+  lats.push(bbox.maxLat)
+  const lngs: number[] = []
+  for (let lng = bbox.minLng; lng < bbox.maxLng; lng += lngStep) lngs.push(lng)
+  lngs.push(bbox.maxLng)
+
+  for (const lat of lats) for (const lng of lngs) tiles.add(encodeGeohash(lat, lng, 5))
   return [...tiles]
 }

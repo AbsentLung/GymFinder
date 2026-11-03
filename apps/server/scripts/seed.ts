@@ -22,7 +22,7 @@ import { and, eq, sql } from "drizzle-orm"
 import { db } from "../src/db/index.js"
 import { requests, tileFetches } from "../src/db/schema.js"
 import { queue } from "../src/queue/index.js"
-import { isWithinStaleWindow, geohash5TilesCoveringBbox, type Bbox } from "../src/lib.js"
+import { isFetchRowFresh, geohash5TilesCoveringBbox, type Bbox } from "../src/lib.js"
 
 const STALE_MS = 7 * 24 * 60 * 60 * 1000
 const SWEEP_DEADLINE_MS = 60 * 60 * 1000
@@ -33,10 +33,10 @@ interface Destination extends Bbox {
 
 async function isFresh(geohash: string, source: string): Promise<boolean> {
   const [row] = await db
-    .select({ lastFetchedAt: tileFetches.lastFetchedAt })
+    .select({ lastFetchedAt: tileFetches.lastFetchedAt, status: tileFetches.status })
     .from(tileFetches)
     .where(and(eq(tileFetches.geohash, geohash), eq(tileFetches.source, source)))
-  return row !== undefined && isWithinStaleWindow(row.lastFetchedAt, STALE_MS)
+  return isFetchRowFresh(row, STALE_MS)
 }
 
 async function main() {
@@ -60,7 +60,7 @@ async function main() {
     for (const tile of tiles) {
       const osmFresh = await isFresh(tile, "osm")
       if (!osmFresh) {
-        await queue.add("tile-refresh", { geohash5: tile }, { jobId: `tile-refresh:${tile}`, priority: "low" })
+        await queue.add("tile-refresh", { geohash5: tile }, { jobId: `tile-refresh-${tile}`, priority: "low" })
         tilesTouched++
       } else {
         tilesSkipped++
@@ -94,7 +94,7 @@ async function main() {
               })
               .returning()
           )[0].id
-        await queue.add("sweep", { requestId, geohash5: tile }, { jobId: `sweep:${tile}`, priority: "low" })
+        await queue.add("sweep", { requestId, geohash5: tile }, { jobId: `sweep-${tile}`, priority: "low" })
         tilesTouched++
       } else {
         tilesSkipped++
