@@ -15,13 +15,8 @@ interface AuthContextValue {
   signUp: (email: string, password: string, name: string) => Promise<{ error?: string }>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
-  // Async, unlike the old bcrypt+JWT version's authHeaders - on native
-  // this reads the Expo client's stored cookie (SecureStore), which has
-  // no synchronous API. Every raw fetch() call site spreads
-  // `...(await authHeaders())` now. Returns {} on web: a browser
-  // already holds and sends its own cookie automatically given
-  // `credentials: 'include'` on the fetch call itself (see each call
-  // site), it's not something this app reads or attaches by hand there.
+  // Async - on native this reads SecureStore, which has no sync API.
+  // Returns {} on web; the browser sends its own cookie automatically.
   authHeaders: () => Promise<Record<string, string>>;
 }
 
@@ -34,9 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id: session.user.id,
         email: session.user.email,
         name: session.user.name,
-        // additionalFields.role (apps/server/src/auth.ts) - not on
-        // Better Auth's own default user shape, so TypeScript doesn't
-        // know about it from createAuthClient's inferred type alone.
+        // role is a server-side additionalField, not in the inferred type.
         isAdmin: (session.user as { role?: string }).role === 'admin',
       }
     : null;

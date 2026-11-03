@@ -19,18 +19,9 @@ export async function buildApp() {
   const app = Fastify({ logger: true })
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
-  // `credentials: true` (+ `origin: true`, which reflects whatever the
-  // request's own Origin header is rather than a fixed allow-list) is
-  // needed for the web app's session cookie to actually travel on a
-  // cross-origin request at all - caught before it ever shipped broken:
-  // the API and the web app's own dev server run on different ports
-  // (and, in production, different domains/CDN origins), and a browser
-  // silently drops a Set-Cookie response (and never sends the cookie
-  // back later) for a cross-origin fetch unless the server explicitly
-  // allows credentials - the previous no-options registration left this
-  // header unset. `origin: true` is required alongside `credentials:
-  // true`, not a separate choice - the CORS spec forbids the literal
-  // wildcard `*` together with credentialed requests.
+  // credentials: true is needed for the web app's session cookie to
+  // travel cross-origin at all. origin: true is required alongside it -
+  // the CORS spec forbids a literal wildcard with credentialed requests.
   await app.register(cors, { origin: true, credentials: true })
 
   // Not under /v1 (API.md 1.6) - for the load balancer/Docker, not the app.
