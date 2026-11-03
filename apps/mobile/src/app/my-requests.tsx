@@ -6,13 +6,9 @@ import { useAuth } from '@/auth-context';
 import { API_BASE_URL } from '@/config';
 import { type GymRequest } from '@/components/gym-panels';
 
-// The one other explicitly-planned new screen besides the review "Edit"
-// button (gym-panels.tsx's ReviewsSection) - API.md 2.5's "My requests":
-// add-gym, update-gym and sweep requests, newest first. Chats aren't
-// listed (they're never stored - API.md 1.4, there's nothing to list).
-// Styled to match the existing profile/admin screens' dark utility-page
-// look (same ACCENT/BG, chip filters, row cards), not a new visual
-// language for the one page that's actually new here.
+// My requests: add-gym, update-gym and sweep requests, newest first.
+// Chats aren't listed - they're never stored. Styled to match the
+// existing profile/admin screens' dark utility-page look.
 const STATUS_FILTERS: { value: '' | 'pending' | 'completed' | 'failed'; label: string }[] = [
   { value: '', label: 'All' },
   { value: 'pending', label: 'Pending' },
@@ -167,24 +163,29 @@ export default function MyRequestsScreen() {
 
 const ACCENT = '#CEFF45';
 const BG = '#111315';
+const TEXT = '#F4F4F2';
+const TEXT_MUTED = '#A9ADB3';
+const TEXT_DIM = '#777D84';
+const ERROR = '#E9643A';
+const BORDER = '#2C3034';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, padding: 24, gap: 14, alignItems: 'center' },
-  title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 26, color: '#F4F4F2', width: '100%', maxWidth: 640 },
-  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: '#A9ADB3' },
+  title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 26, color: TEXT, width: '100%', maxWidth: 640 },
+  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: TEXT_MUTED },
   submitButton: { backgroundColor: ACCENT, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 20 },
-  submitButtonText: { color: '#111315', fontWeight: '700', fontSize: 14 },
+  submitButtonText: { color: BG, fontWeight: '700', fontSize: 14 },
   filterRow: { flexDirection: 'row', gap: 8, width: '100%', maxWidth: 640, flexWrap: 'wrap', alignItems: 'center' },
-  chip: { borderWidth: 1, borderColor: '#2C3034', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
+  chip: { borderWidth: 1, borderColor: BORDER, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
   chipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
-  chipText: { color: '#A9ADB3', fontSize: 12, fontWeight: '600' },
-  chipTextActive: { color: '#111315' },
+  chipText: { color: TEXT_MUTED, fontSize: 12, fontWeight: '600' },
+  chipTextActive: { color: BG },
   refreshButton: { marginLeft: 'auto', paddingHorizontal: 8, paddingVertical: 7 },
   refreshButtonText: { color: ACCENT, fontSize: 12, fontWeight: '600' },
-  error: { color: '#E9643A', fontSize: 13 },
+  error: { color: ERROR, fontSize: 13 },
   list: { width: '100%', maxWidth: 640, flex: 1 },
   listContent: { gap: 12, paddingBottom: 24 },
-  row: { borderWidth: 1, borderColor: '#2C3034', borderRadius: 12, padding: 14, gap: 6, backgroundColor: '#1B1E21' },
+  row: { borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14, gap: 6, backgroundColor: '#1B1E21' },
   rowHeader: { flexDirection: 'row', justifyContent: 'space-between' },
   rowType: {
     fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
@@ -193,10 +194,10 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  rowStatus: { fontSize: 11, color: '#777D84', fontWeight: '600', textTransform: 'uppercase' },
-  rowStatusFailed: { color: '#E9643A' },
+  rowStatus: { fontSize: 11, color: TEXT_DIM, fontWeight: '600', textTransform: 'uppercase' },
+  rowStatusFailed: { color: ERROR },
   rowStatusCompleted: { color: ACCENT },
-  rowSummary: { color: '#F4F4F2', fontSize: 14, fontWeight: '600' },
+  rowSummary: { color: TEXT, fontSize: 14, fontWeight: '600' },
   rowMeta: { color: '#6C7177', fontSize: 11 },
   retryButton: { alignSelf: 'flex-start', marginTop: 6, borderWidth: 1, borderColor: ACCENT, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
   retryButtonText: { color: ACCENT, fontWeight: '700', fontSize: 13 },
