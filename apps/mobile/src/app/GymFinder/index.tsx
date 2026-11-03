@@ -6,23 +6,12 @@ import * as Location from 'expo-location';
 import { LocationSearch, type LocationResult } from '@/components/location-search';
 import { useAuth } from '@/auth-context';
 
-// Wider than LocationSearch's own FALLBACK_RADIUS_DEG (0.05, sized for a
-// single landmark/point result) - "near me" is a device GPS fix, closer
-// in spirit to a neighborhood-level search than a pinpoint, so it gets a
-// bit more room to find gyms around you.
+// Wider than LocationSearch's own FALLBACK_RADIUS_DEG - "near me" wants
+// neighborhood-level radius, not a point search.
 const NEAR_ME_RADIUS_DEG = 0.1;
 
-// Rounded, not raw - a device GPS fix jitters by tens/hundreds of meters
-// between calls even standing still, so two "Near me" clicks a minute
-// apart produce two slightly different bboxes. The server's
-// area-freshness check is an exact containment test (by design - it's
-// meant to recognize "this place was already fetched"), so unrounded
-// coordinates meant every single click looked like a brand-new area and
-// re-triggered a full ~30s+ Overpass fetch even for the same physical
-// spot a minute earlier. Caught live: 5 separate fetched_areas rows for
-// essentially the same Brooklyn block within 40 minutes. 2 decimal
-// places is a ~1.1km grid, small relative to the 0.1° (~11km) search
-// radius itself, so this doesn't change what counts as "nearby."
+// Rounded to ~1.1km so repeat clicks from roughly the same spot hit the
+// same cached area instead of each re-triggering an Overpass fetch.
 function nearMeResult(rawLat: number, rawLng: number): LocationResult {
   const lat = Math.round(rawLat * 100) / 100;
   const lng = Math.round(rawLng * 100) / 100;
@@ -40,13 +29,7 @@ function nearMeResult(rawLat: number, rawLng: number): LocationResult {
   };
 }
 
-// navigator.geolocation doesn't exist on native at all - it's a browser
-// API. That's why this used to go straight to the "error" state on
-// Android/iOS without ever actually prompting for permission: the
-// Platform.OS !== 'web' check short-circuited before anything resembling
-// a real permission request happened. expo-location is the real native
-// path, and requestForegroundPermissionsAsync is what actually triggers
-// the OS's own permission dialog.
+// navigator.geolocation is web-only; expo-location is the native path.
 function useNearMe(onFound: (result: LocationResult) => void) {
   const [status, setStatus] = useState<'idle' | 'locating' | 'error'>('idle');
 
@@ -87,10 +70,8 @@ function useNearMe(onFound: (result: LocationResult) => void) {
   return { status, findNearMe };
 }
 
-// "Pulse" - the dark, kinetic direction chosen from the homepage-concepts
-// design artifact. Archivo for the headline, IBM Plex Mono for the
-// kicker/stats - loaded as Google Fonts, web-only (this app's only real
-// target so far; native just falls back to the system font).
+// Archivo + IBM Plex Mono, loaded via Google Fonts - web only, native
+// falls back to the system font.
 const FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;900&family=IBM+Plex+Mono:wght@400;500&display=swap';
 
@@ -105,9 +86,7 @@ function useWebFonts() {
   }, []);
 }
 
-// A soft radial ping around the "LIVE" dot - Animated rather than a CSS
-// keyframe so it's the same code path on web and native, not a web-only
-// hack like the dot-grid background below.
+// Pulsing ring around the "LIVE" dot - Animated, not CSS, so it works on native too.
 function LiveDot() {
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(0.7)).current;
@@ -193,10 +172,7 @@ export default function HomeScreen() {
         <Text style={styles.title} numberOfLines={1}>
           Train <Text style={styles.titleAccent}>anywhere.</Text>
         </Text>
-        {/* eslint-disable-next-line react/jsx-no-comment-textnodes -- this
-            renders as literal visible text today ("// Stay fit..."); not
-            changing it since that's a visible-behavior call, not a lint
-            fix - see chat. */}
+        {/* eslint-disable-next-line react/jsx-no-comment-textnodes -- intentional visible text */}
         <Text style={styles.subtitle} numberOfLines={1}>
           // Stay fit while you travel - search a city, find a gym drop-in or trial membership.
         </Text>
@@ -236,22 +212,24 @@ export default function HomeScreen() {
 
 const ACCENT = '#CEFF45';
 const BG = '#111315';
+const TEXT = '#F4F4F2';
+const TEXT_MUTED = '#A9ADB3';
+const TEXT_DIM = '#777D84';
+const ERROR = '#E9643A';
+const FONT_DISPLAY = 'Archivo, sans-serif';
+const FONT_MONO = 'IBM Plex Mono, ui-monospace, monospace';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   accountCorner: { position: 'absolute', top: 20, right: 24, flexDirection: 'row', gap: 18, zIndex: 20 },
   accountLink: {
-    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+    fontFamily: FONT_MONO,
     fontSize: 12,
-    color: '#A9ADB3',
+    color: TEXT_MUTED,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  // Faint dot-grid texture, fading toward the edges - web-only CSS the RN
-  // style resolver passes through verbatim; native just renders a plain
-  // dark background instead; see styles.resultDark pattern in
-  // location-search.tsx for the equivalent "built for web first" choice
-  // already established elsewhere in this screen's flow.
+  // Web-only dot-grid texture; native renders a plain dark background.
   dotGrid: {
     position: 'absolute',
     inset: 0,
@@ -269,7 +247,7 @@ const styles = StyleSheet.create({
   liveDotRing: { position: 'absolute', width: 8, height: 8, borderRadius: 4, backgroundColor: ACCENT },
   liveDotCore: { width: 8, height: 8, borderRadius: 4, backgroundColor: ACCENT },
   kicker: {
-    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+    fontFamily: FONT_MONO,
     fontSize: 12,
     fontWeight: '500',
     letterSpacing: 2,
@@ -277,46 +255,42 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   title: {
-    fontFamily: 'Archivo, sans-serif',
+    fontFamily: FONT_DISPLAY,
     fontWeight: '900',
     fontSize: 44,
     lineHeight: 46,
-    color: '#F4F4F2',
+    color: TEXT,
     letterSpacing: -0.5,
   },
   titleAccent: { color: ACCENT },
   subtitle: {
-    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+    fontFamily: FONT_MONO,
     fontSize: 13,
     lineHeight: 20,
-    color: '#A9ADB3',
+    color: TEXT_MUTED,
   },
-  // zIndex here, not just on LocationSearch's own internal wrap - that one
-  // only out-ranks its own siblings. This is the sibling that actually
-  // competes with `stats` for stacking order in `content`, and without an
-  // explicit zIndex it loses to `stats` on DOM order alone (later wins
-  // ties), so the dropdown rendered under the stat numbers.
+  // Needed so the search dropdown stacks above `stats`, not under it.
   searchWrap: { width: '100%', marginTop: 4, zIndex: 10 },
   nearMe: {
-    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+    fontFamily: FONT_MONO,
     fontSize: 13,
-    color: '#A9ADB3',
+    color: TEXT_MUTED,
     marginTop: -8,
   },
-  nearMeError: { color: '#E9643A' },
+  nearMeError: { color: ERROR },
   stats: { flexDirection: 'row', gap: 28, marginTop: 8 },
   stat: { alignItems: 'flex-start' },
   statValue: {
-    fontFamily: 'Archivo, sans-serif',
+    fontFamily: FONT_DISPLAY,
     fontWeight: '900',
     fontSize: 22,
     color: ACCENT,
     fontVariant: ['tabular-nums'],
   },
   statLabel: {
-    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+    fontFamily: FONT_MONO,
     fontSize: 11,
-    color: '#777D84',
+    color: TEXT_DIM,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginTop: 2,
