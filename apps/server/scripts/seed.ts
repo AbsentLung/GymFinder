@@ -1,19 +1,8 @@
-// API.md 2.8: "Seeding is a CLI command run by us (`npm run seed --
-// --list destinations.json`), not an HTTP route." DESIGN_DISCUSSION.md:
-// "not a separate system... a small command-line tool that turns a list
-// of destinations into sweep jobs, and then reuses the same queue,
-// workers and source plugins as user-requested sweeps" - Overpass
-// first, then the Google Maps sweep, both at low priority so a real
-// user's own sweep/tile request still jumps ahead while a seed run is
-// still going.
+// CLI seeding - reuses the same queue/workers/sources as a user sweep,
+// both at low priority so a real request jumps ahead.
 //
-// Resumable by construction, not by any bookkeeping of its own: each
-// tile's staleness is read from tile_fetches (per source) right before
-// deciding whether to enqueue anything for it, the exact same check the
-// tiles/sweeps routes make. Re-running this script after a crash, a
-// block, or just to pick up new destinations only re-does tiles that
-// are still stale - everything the previous run actually finished stays
-// skipped.
+// Resumable by construction: each tile's staleness is read fresh before
+// enqueueing, so a re-run only re-does tiles still stale.
 //
 // Usage:
 //   DATABASE_URL=postgres://... npx tsx scripts/seed.ts --list destinations.json
@@ -68,13 +57,8 @@ async function main() {
 
       const googleMapsFresh = await isFresh(tile, "google_maps")
       if (!googleMapsFresh) {
-        // A prior run's sweep for this exact tile might still be
-        // in-flight (pg-boss's exclusive-policy jobId dedup makes the
-        // queue.add() below a no-op in that case, but naively inserting
-        // a FRESH `requests` row every time regardless would leave that
-        // new row dangling forever - no job ever actually points at it,
-        // since the real in-flight job still references the original
-        // one). Attach to it instead, same as POST /v1/sweeps itself.
+        // A prior run's sweep for this tile might still be in-flight -
+        // attach to it instead, same as POST /v1/sweeps itself.
         const [pending] = await db
           .select({ id: requests.id })
           .from(requests)
