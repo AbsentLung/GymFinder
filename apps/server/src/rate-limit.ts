@@ -1,8 +1,6 @@
-// Small, cache-backed fixed-window limiter - "rate limited per user or
-// IP" (API.md 2.4b) for chat, and anything else that needs the same
-// shape later. Not atomic (a read-then-write race under real concurrency
-// could let a couple of extra requests through a tight window) - a
-// proportionate tradeoff for a single counter, not a payments system.
+// Small, cache-backed fixed-window limiter. Not atomic - a read-then-
+// write race could let a couple extra requests through, a fine
+// tradeoff for a counter, not a payments system.
 import { cache } from "./cache/index.js"
 
 export async function checkRateLimit(key: string, max: number, windowSeconds: number): Promise<boolean> {

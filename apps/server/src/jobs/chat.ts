@@ -1,22 +1,10 @@
-// API.md 2.4b / FR-8, FR-9. Two separate LLM turns, not one - ported
-// from server/index.js's chat endpoint, which found (and explicitly
-// documented) a real, repeatable bug combining them: a turn that both
-// researches AND writes a reply let the model state a price it had just
-// found in the reply text WITHOUT calling the tool to record it.
-// Splitting "find and record" (phase 1, no reply) from "answer the
-// question" (phase 2, no tools) removes the competing pull that caused
-// that miss.
+// Two separate LLM turns, not one - combining "find and record" with
+// "answer the question" let the model state a found price in the reply
+// without ever calling the tool to record it.
 //
-// Facts found in phase 1 do NOT get folded into phase 2's "on-file"
-// facts the way the old demo's direct-write version could (re-reading
-// Postgres after writing straight to it) - a fact found via chat here
-// becomes a gym_changes row for review first (FR-9: "can be saved...
-// subject to FR-17"), the same bot-review pipeline every other source
-// goes through (STACK_AND_SCHEMA.md 2.10), so it isn't live yet by the
-// time phase 2 answers. Phase 2 still gets to mention it, just labeled
-// as unverified research, not as a confirmed fact (FR-8: "anything it
-// finds outside the gym's own website or a recent price menu is
-// unverified" - unverified doesn't mean unmentionable).
+// A fact found in phase 1 isn't live by the time phase 2 answers - it
+// goes through the normal bot-review pipeline first. Phase 2 can still
+// mention it, just labeled as unverified research.
 import { sql, eq, desc } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymPrices, reviews } from "../db/schema.js"
@@ -31,12 +19,9 @@ import type { ToolDef, ChatMessage } from "../interfaces/llm.js"
 
 export const CHAT_TTL_SECONDS = 15 * 60
 
-// question/history are NOT part of the job payload (see routes/chat.ts)
-// - they live only in the cache, under chat:<chatId>:input, with the
-// same TTL as the chat result. CLAUDE.md: never store chat questions
-// or answers in Postgres or logs - a job's payload is exactly that,
-// written by pg-boss into Postgres in demo mode, and kept by BullMQ
-// in Redis indefinitely in scale mode (no TTL by default).
+// question/history live only in the cache (chat:<chatId>:input), never
+// in the job payload - CLAUDE.md forbids storing chat content in
+// Postgres or logs, which a job payload would.
 export interface ChatPayload {
   [key: string]: unknown
   chatId: string
