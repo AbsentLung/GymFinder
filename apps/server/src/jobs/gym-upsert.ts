@@ -1,9 +1,5 @@
-// Shared by every automated source that merges a RawGym into `gyms`
-// (dedup via gym_source_refs) - originally written for Overpass refresh
-// (src/jobs/tile-refresh.ts), generalized here so a sweep's Google Maps
-// source (src/jobs/sweep.ts) can reuse the exact same merge/dedup
-// mechanics with a different `source` literal, rather than a second,
-// drifting copy of this logic.
+// Shared merge/dedup logic for every automated source that writes into
+// `gyms` (Overpass refresh, a sweep's Google Maps source).
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { isDuplicateMatch } from "../lib.js"
@@ -20,13 +16,8 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
   let isNew = false
   if (existing.rows[0]) {
     gymId = existing.rows[0].gym_id
-    // name/location: the source is authoritative EXCEPT within a year
-    // of an approved admin/bot decision on this gym's name or location
-    // (gyms.nameLocationDecidedAt, bot-review.ts's applyProposedChange)
-    // - without this check, next week's refresh silently undoes a
-    // correction someone just approved. address/description: COALESCE,
-    // fill the gap only - never overwrite a better answer the bot/
-    // admin/chat already gave.
+    // name/location: source is authoritative except within a year of an
+    // approved admin/bot decision. address/description: COALESCE only.
     await db.execute(sql`
       UPDATE gyms SET
         name = CASE WHEN name_location_decided_at IS NULL OR name_location_decided_at < now() - interval '1 year' THEN ${g.name} ELSE name END,
@@ -36,18 +27,8 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
       WHERE id = ${gymId}
     `)
   } else {
-    // A source can map the same real-world gym twice under two
-    // different element ids (and two DIFFERENT sources can map the same
-    // gym under IDs that share nothing) - a plain external-id match can
-    // never catch either case. Caught live in the vibe-coded demo
-    // ("Income Gym" mapped twice by OSM, ~4m apart, a permanently-stuck
-    // 2-pin map cluster) and fixed there the same way: check
-    // name+proximity against every OTHER known gym before inserting,
-    // same threshold the rest of this app uses for dedup.
-    // ORDER BY the point's own <-> distance to the gist index, not a
-    // haversine expression computed for every row - ST_DWithin first
-    // so the index actually gets used to prune, then <-> just for
-    // ORDER BY.
+    // A source can map the same real gym under two element ids - plain
+    // external-id matching can't catch that, so check name+proximity too.
     const point = sql`ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326)`
     const nearby = await db.execute<{ gym_id: number; name_similarity: number; distance_km: number }>(sql`
       SELECT r.gym_id, similarity(g.name, ${g.name}) AS name_similarity,
@@ -85,8 +66,7 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
   }
 
   if (g.categories && g.categories.length > 0) {
-    // Additive merge (union), never replaces - same rule
-    // migrate-demo-data.ts and the old demo both use.
+    // Additive merge (union), never replaces.
     await db.execute(sql`UPDATE gyms SET categories = ARRAY(SELECT DISTINCT unnest(categories || ${g.categories})) WHERE id = ${gymId}`)
   }
 
