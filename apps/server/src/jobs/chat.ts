@@ -23,7 +23,7 @@ import { gymPrices, reviews } from "../db/schema.js"
 import { cache } from "../cache/index.js"
 import { llm } from "../llm/index.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
-import { reverseGeocode } from "../geocode.js"
+import { tryReverseGeocode } from "../geocode.js"
 import { createGymChange, NON_PRICE_FIELDS } from "./bot-review.js"
 import type { ProposedChange, PriceKind, NonPriceField } from "./bot-review.js"
 import { amountMajorToMinor, GYM_CATEGORIES } from "../lib.js"
@@ -31,10 +31,19 @@ import type { ToolDef, ChatMessage } from "../interfaces/llm.js"
 
 export const CHAT_TTL_SECONDS = 15 * 60
 
+// question/history are NOT part of the job payload (see routes/chat.ts)
+// - they live only in the cache, under chat:<chatId>:input, with the
+// same TTL as the chat result. CLAUDE.md: never store chat questions
+// or answers in Postgres or logs - a job's payload is exactly that,
+// written by pg-boss into Postgres in demo mode, and kept by BullMQ
+// in Redis indefinitely in scale mode (no TTL by default).
 export interface ChatPayload {
   [key: string]: unknown
   chatId: string
   gymId: number
+}
+
+interface ChatInput {
   question: string
   history: ChatMessage[]
 }
@@ -90,14 +99,24 @@ async function setChatResult(chatId: string, result: Record<string, unknown>) {
   await cache.set(`chat:${chatId}`, JSON.stringify(result), CHAT_TTL_SECONDS)
 }
 
-export async function processChat({ chatId, gymId, question, history }: ChatPayload): Promise<void> {
+export async function processChat({ chatId, gymId }: ChatPayload): Promise<void> {
   try {
+    const rawInput = await cache.get(`chat:${chatId}:input`)
+    if (!rawInput) {
+      // TTL beat us to it, or something re-processed this chatId -
+      // either way there's no question left to answer.
+      await setChatResult(chatId, { status: "failed" })
+      return
+    }
+    const { question, history }: ChatInput = JSON.parse(rawInput)
+    await cache.del(`chat:${chatId}:input`)
+
     const gym = await fetchGymForChat(gymId)
     if (!gym) {
       await setChatResult(chatId, { status: "failed" })
       return
     }
-    const location = await reverseGeocode(gym.lat, gym.lng)
+    const location = await tryReverseGeocode(gym.lat, gym.lng)
 
     const researchPrompt = `A traveler is asking a question about the gym "${gym.name}"${
       location ? ` in ${location}` : ""

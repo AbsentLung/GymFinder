@@ -428,7 +428,8 @@ export async function insertUnverifiedPrice(gymId: number, proposed: PricePropos
 export async function createGymChange(requestId: number | null, gymId: number | null, proposed: ProposedChange): Promise<number> {
   const [change] = await db.insert(gymChanges).values({ requestId, gymId, proposed }).returning()
   if (proposed.kind === "price" && gymId) await insertUnverifiedPrice(gymId, proposed)
-  await queue.add("bot-review", { changeId: change.id }, { jobId: `bot-review:${change.id}` })
+  // "-" not ":" - BullMQ rejects a custom id containing a colon.
+  await queue.add("bot-review", { changeId: change.id }, { jobId: `bot-review-${change.id}` })
   return change.id
 }
 

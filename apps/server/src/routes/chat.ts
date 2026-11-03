@@ -46,7 +46,15 @@ export const chatRoutes: FastifyPluginAsyncZod = async (app) => {
       const history = request.body.history.slice(-MAX_HISTORY).map((h) => ({ role: h.role, content: h.text }))
 
       await cache.set(`chat:${chatId}`, JSON.stringify({ status: "pending" }), CHAT_TTL_SECONDS)
-      await queue.add("chat", { chatId, gymId: id, question: request.body.question, history })
+      // The question/history never go into the job payload (CLAUDE.md:
+      // "never store chat questions or answers in Postgres or logs") -
+      // a job's payload is exactly that, written by pg-boss into
+      // Postgres in demo mode, and kept by BullMQ in Redis indefinitely
+      // in scale mode. The cache entry has the same 15-minute TTL as
+      // the chat result itself, and processChat deletes it as soon as
+      // it's read.
+      await cache.set(`chat:${chatId}:input`, JSON.stringify({ question: request.body.question, history }), CHAT_TTL_SECONDS)
+      await queue.add("chat", { chatId, gymId: id })
 
       reply.status(202)
       return { chatId }
