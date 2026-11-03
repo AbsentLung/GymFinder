@@ -1,6 +1,4 @@
-// API.md 2.6 - the admin review queue for gym_changes awaiting_admin,
-// plus a spot-check view of what the bot auto-approved, plus role
-// promotion (replacing the demo's removed "apply to be admin" flow).
+// Admin review queue for gym_changes, plus role promotion.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
 import { and, asc, eq, gt, sql } from "drizzle-orm"
@@ -23,12 +21,9 @@ interface CurrentGymRow {
   status: string
 }
 
-// Raw SQL, not db.select().from(gyms) - caught building the admin UI
-// that actually renders this: Drizzle's query builder passes `location`
-// straight through the point customType's intentionally-incomplete
-// fromDriver (src/db/schema.ts's own comment), which hands back raw
-// EWKB hex, not {lat, lng} - meaningless to render. Same ST_X/ST_Y
-// extraction src/routes/tiles.ts and src/routes/gyms.ts already use.
+// Raw SQL, not db.select().from(gyms) - the point customType's
+// fromDriver hands back raw EWKB hex, not {lat, lng}. Same ST_X/ST_Y
+// extraction tiles.ts and gyms.ts already use.
 async function fetchCurrentGym(gymId: number) {
   const result = await db.execute<CurrentGymRow>(sql`
     SELECT id, name, ST_Y(location) AS lat, ST_X(location) AS lng, address, description,
