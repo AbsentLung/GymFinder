@@ -110,7 +110,8 @@ async function createRequest(userId: number, kind: "add_gym" | "update_gym", inp
     `)
   }
 
-  await queue.add("bot-review", { requestId: request.id }, { jobId: `bot-review:${request.id}` })
+  // "-" not ":" - BullMQ rejects a custom id containing a colon.
+  await queue.add("bot-review", { requestId: request.id }, { jobId: `bot-review-${request.id}` })
   return request.id
 }
 

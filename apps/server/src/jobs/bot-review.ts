@@ -12,7 +12,7 @@ import { db } from "../db/index.js"
 import { gymChanges, requests } from "../db/schema.js"
 import { llm } from "../llm/index.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
-import { reverseGeocode } from "../geocode.js"
+import { reverseGeocode, tryReverseGeocode, GeocoderUnavailableError } from "../geocode.js"
 import { getFxRates } from "../fx.js"
 import { convertToUsdCents, isDuplicateMatch, looksLikeRealCoordinates, amountMinorToMajor } from "../lib.js"
 import type { ToolDef } from "../interfaces/llm.js"
@@ -68,6 +68,17 @@ const CONFIRM_PRICE_TOOL: ToolDef = {
     properties: {
       price_amount: { type: "number", description: "The numeric price you found, in its own currency. Omit/null if you found nothing credible." },
       price_currency: { type: "string", description: "ISO 4217 code for price_amount's currency, e.g. 'IDR', 'USD'." },
+      source_kind: {
+        type: "string",
+        enum: ["gym_website", "google_maps_menu_photo", "other"],
+        description:
+          "Where price_amount came from. 'gym_website' - the gym's own website. 'google_maps_menu_photo' - a price menu photo posted on its Google Maps listing. 'other' - anywhere else (a review, a third-party listing site, etc). Required whenever price_amount is set.",
+      },
+      source_url: { type: "string", description: "The URL price_amount came from, if any." },
+      menu_posted_on: {
+        type: "string",
+        description: "ISO date (YYYY-MM-DD) the menu photo was posted, if source_kind is 'google_maps_menu_photo' and a date is visible. Omit if unknown.",
+      },
       reason: { type: "string" },
     },
     required: ["reason"],
@@ -76,13 +87,14 @@ const CONFIRM_PRICE_TOOL: ToolDef = {
 
 const CONFIRM_TEXT_TOOL: ToolDef = {
   name: "confirm_text_edit",
-  description: "State your conclusion after searching for evidence (the gym's own website, reviews, listings) about one specific proposed value. Call this exactly once, after searching - not before.",
+  description: "State your conclusion after searching for evidence about one specific proposed value. Call this exactly once, after searching - not before.",
   inputSchema: {
     type: "object",
     properties: {
       confirmed: {
         type: "boolean",
-        description: "True ONLY if you found a credible source that actually supports this specific value. False if you found contradicting info, or found nothing either way - don't guess true just because nothing contradicts it.",
+        description:
+          "True ONLY if the gym's own website or its Google Maps listing confirms this specific value (FR-25) - not a review, a chat answer, OpenStreetMap, or anywhere else on the web. False if you found contradicting info, found it only in a source that doesn't count, or found nothing either way - don't guess true just because nothing contradicts it.",
       },
       reason: { type: "string" },
     },
@@ -120,16 +132,36 @@ export async function verifyGymChange(change: ProposedChange, gymId: number | nu
 }
 
 async function findDuplicateGym(name: string, lat: number, lng: number): Promise<{ id: number } | null> {
+  // ST_DWithin + <-> so this actually uses gyms_location_gist, instead
+  // of computing a haversine distance for every active gym.
+  const point = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`
   const nearby = await db.execute<{ id: number; name_similarity: number; distance_km: number }>(sql`
     SELECT id, similarity(name, ${name}) AS name_similarity,
-      (6371 * acos(GREATEST(-1, LEAST(1,
-        cos(radians(${lat})) * cos(radians(ST_Y(location))) * cos(radians(ST_X(location)) - radians(${lng})) +
-        sin(radians(${lat})) * sin(radians(ST_Y(location)))
-      )))) AS distance_km
-    FROM gyms WHERE status = 'active' ORDER BY distance_km ASC LIMIT 3
+      ST_Distance(location::geography, ${point}::geography) / 1000 AS distance_km
+    FROM gyms WHERE status = 'active' AND ST_DWithin(location::geography, ${point}::geography, 500)
+    ORDER BY location <-> ${point} ASC LIMIT 3
   `)
   const match = nearby.rows.find((row) => isDuplicateMatch(row.distance_km, row.name_similarity))
   return match ? { id: match.id } : null
+}
+
+// FR-25's "exists in OpenStreetMap... within about 50 m... with a
+// matching name" - a direct, cheap DB check against OSM-sourced
+// gym_source_refs rows, no LLM call needed. Narrower than
+// findDuplicateGym's 200m/0.4-similarity dup check (which runs first
+// and would normally catch a true duplicate already) - this is a
+// lighter bar specifically to let "it's already in OSM" alone satisfy
+// FR-25, without requiring a Google Maps/website LLM search too.
+async function findOsmEvidence(name: string, lat: number, lng: number): Promise<string | null> {
+  const point = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`
+  const rows = await db.execute<{ name: string; name_similarity: number }>(sql`
+    SELECT g.name, similarity(g.name, ${name}) AS name_similarity
+    FROM gym_source_refs r JOIN gyms g ON g.id = r.gym_id
+    WHERE r.source = 'osm' AND ST_DWithin(g.location::geography, ${point}::geography, 50)
+    ORDER BY g.location <-> ${point} ASC LIMIT 1
+  `)
+  const match = rows.rows[0]
+  return match && match.name_similarity > 0.4 ? match.name : null
 }
 
 async function verifyAddGym(change: ProposedChange & { kind: "add_gym" }): Promise<ReviewResult> {
@@ -145,7 +177,24 @@ async function verifyAddGym(change: ProposedChange & { kind: "add_gym" }): Promi
     return { reviewStatus: "rejected", evidence: { reason: "Matches an existing gym already in the database.", existingGymId: duplicate.id } }
   }
 
-  const location = await reverseGeocode(change.lat, change.lng)
+  const osmMatch = await findOsmEvidence(change.name, change.lat, change.lng)
+  if (osmMatch) {
+    return { reviewStatus: "approved", decidedBy: "bot", evidence: { reason: `Found on OpenStreetMap as "${osmMatch}" within 50m.` } }
+  }
+
+  // Thrown (Photon unreachable) is NOT the same signal as null
+  // (Photon answered, found nothing) - an outage isn't evidence this
+  // location is impossible, so it goes to an admin instead of being
+  // auto-rejected.
+  let location: string | null
+  try {
+    location = await reverseGeocode(change.lat, change.lng)
+  } catch (e) {
+    if (e instanceof GeocoderUnavailableError) {
+      return { reviewStatus: "awaiting_admin", evidence: { reason: "Geocoder unavailable - needs manual review." } }
+    }
+    throw e
+  }
   if (!location) {
     // Can't resolve this to anywhere on land at all - the same signal
     // FR-26's "impossible location (e.g. in the sea)" example describes.
@@ -168,10 +217,13 @@ async function verifyFieldChangeForGym(
   change: ProposedChange & { kind: "field" },
   gym: { name: string; lat: number; lng: number }
 ): Promise<ReviewResult> {
-  const location = await reverseGeocode(gym.lat, gym.lng)
+  const location = await tryReverseGeocode(gym.lat, gym.lng)
+  // FR-25: only the gym's own website or its Google Maps listing
+  // verify a non-price field edit - OpenStreetMap and reviews are
+  // fine as search leads but don't count as evidence on their own.
   const systemPrompt = `A traveler has proposed updating the ${change.field} for the gym "${gym.name}"${
     location ? ` in ${location}` : ""
-  } to: ${formatFieldValue(change.newValue)}. Try to find credible evidence (the gym's own website, its Google Maps listing, OpenStreetMap) about this - include the location in your search query, not just the name. Start with web_search; its result snippets are short marketing excerpts that often won't show the actual fact you need, so use fetch_url on a promising result's real URL to read the page itself, or find_website_on_google_maps if you don't have a URL yet. Then call confirm_text_edit with your conclusion.`
+  } to: ${formatFieldValue(change.newValue)}. Try to find this confirmed on the gym's own website or its Google Maps listing - include the location in your search query, not just the name. Start with web_search; its result snippets are short marketing excerpts that often won't show the actual fact you need, so use fetch_url on a promising result's real URL to read the page itself, or find_website_on_google_maps if you don't have a URL yet. Then call confirm_text_edit with your conclusion.`
 
   const response = await llm.runAgentTurn({
     system: systemPrompt,
@@ -200,13 +252,16 @@ async function verifyPriceChange(
   `).then((r) => r.rows)
   if (!gym) return { reviewStatus: "awaiting_admin", evidence: { reason: "Gym not found." } }
 
-  const location = await reverseGeocode(gym.lat, gym.lng)
+  const location = await tryReverseGeocode(gym.lat, gym.lng)
   const proposedMajor = amountMinorToMajor(change.amountMinor, change.currency)
   const proposedUsd = `$${((await resolveUsdCents(change.amountMinor, change.currency)) / 100).toFixed(2)} USD`
   const hint = change.sourceUrl ? ` The submitter pointed at ${change.sourceUrl} as their source - fetch that first.` : ""
+  // FR-24: only the gym's own website (any age) or a Google Maps menu
+  // photo posted under a year ago verify a price - a review or any
+  // other listing site doesn't, however close the number is.
   const systemPrompt = `A traveler has proposed a ${change.priceKind.replace("_", " ")} price for the gym "${gym.name}"${
     location ? ` in ${location}` : ""
-  } of ${proposedMajor} ${change.currency} (${proposedUsd}).${hint} Try to find credible evidence of this gym's real price - the gym's own website is the only source that counts as verified (STACK_AND_SCHEMA.md 2.6); a review or listing site doesn't count, but is still worth reporting if that's all you find. Use fetch_url on a specific URL when you have one, web_search or find_website_on_google_maps otherwise. Then call confirm_price_finding with whatever price you found, in its original currency - don't convert it yourself.`
+  } of ${proposedMajor} ${change.currency} (${proposedUsd}).${hint} Try to find credible evidence of this gym's real price - only the gym's own website, or a price menu photo posted on its Google Maps listing less than a year ago, counts as verified (FR-24); a review or any other listing site doesn't count, but is still worth reporting if that's all you find. Use fetch_url on a specific URL when you have one, web_search or find_website_on_google_maps otherwise. Then call confirm_price_finding with whatever price you found, in its original currency - don't convert it yourself - and exactly where it came from.`
 
   const response = await llm.runAgentTurn({
     system: systemPrompt,
@@ -216,8 +271,30 @@ async function verifyPriceChange(
   const toolUse = response.toolUses.find((t) => t.name === "confirm_price_finding")
   if (!toolUse) return { reviewStatus: "awaiting_admin", evidence: { reason: "Couldn't reach a conclusion." } }
 
-  const { price_amount, price_currency, reason } = toolUse.input as { price_amount?: number; price_currency?: string; reason?: string }
+  const { price_amount, price_currency, source_kind, source_url, menu_posted_on, reason } = toolUse.input as {
+    price_amount?: number
+    price_currency?: string
+    source_kind?: string
+    source_url?: string
+    menu_posted_on?: string
+    reason?: string
+  }
   if (price_amount == null || !price_currency) return { reviewStatus: "awaiting_admin", evidence: { reason: reason ?? "No price found to compare." } }
+
+  const menuIsRecent = Boolean(menu_posted_on) && Date.now() - new Date(menu_posted_on as string).getTime() < 365 * 24 * 60 * 60 * 1000
+  const sourceCounts = source_kind === "gym_website" || (source_kind === "google_maps_menu_photo" && menuIsRecent)
+  if (!sourceCounts) {
+    return {
+      reviewStatus: "awaiting_admin",
+      evidence: {
+        reason: reason ?? "Found a price, but not from a source that counts as verified.",
+        foundAmount: price_amount,
+        foundCurrency: price_currency,
+        sourceKind: source_kind,
+        sourceUrl: source_url,
+      },
+    }
+  }
 
   let foundCents: number
   try {
@@ -298,11 +375,15 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
     throw new Error(`gym_changes row has a pre-Phase-5 proposed shape with no "kind" discriminator: ${JSON.stringify(proposed)}`)
   }
   if (proposed.kind === "add_gym") {
+    // name_location_decided_at stamped on creation - this gym's name/
+    // location came from an approved add_gym change, not OSM, so the
+    // weekly OSM refresh (upsertGym) shouldn't silently overwrite
+    // either of them for a year.
     const inserted = await tx.execute(sql`
-      INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial)
+      INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial, name_location_decided_at)
       VALUES (${proposed.name}, ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326),
         ${proposed.address ?? null}, ${proposed.description ?? null}, ${proposed.categories},
-        ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null})
+        ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now())
       RETURNING id
     `)
     const newGymId = inserted.rows[0].id
@@ -327,6 +408,13 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
 
   if (proposed.kind === "field") {
     const column = FIELD_TO_COLUMN[proposed.field]
+    // An approved name change re-stamps name_location_decided_at (see
+    // that column's own comment) - a fresh admin/bot decision, so the
+    // weekly OSM refresh should respect it for another year.
+    if (proposed.field === "name") {
+      await tx.execute(sql`UPDATE gyms SET name = ${proposed.newValue}, name_location_decided_at = now() WHERE id = ${gymId}`)
+      return
+    }
     await tx.execute(sql`UPDATE gyms SET ${sql.raw(column)} = ${proposed.newValue} WHERE id = ${gymId}`)
     return
   }
