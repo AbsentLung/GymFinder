@@ -36,6 +36,13 @@
       "when": 1793651614656,
       "tag": "0004_premium_true_believers",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793718191855,
+      "tag": "0005_normal_liz_osborn",
+      "breakpoints": true
     }
   ]
 }

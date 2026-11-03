@@ -1,0 +1,1 @@
+ALTER TABLE "gyms" ADD COLUMN "name_location_decided_at" timestamp with time zone;

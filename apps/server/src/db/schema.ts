@@ -152,6 +152,13 @@ export const gyms = pgTable(
     // Opening hours, amenities, website, trial details, etc.
     details: jsonb("details"),
     status: text("status").notNull().default("active"),
+    // Stamped whenever an approved "name" field change or a brand-new
+    // gym is applied (bot-review.ts's applyProposedChange) - lets the
+    // weekly OSM refresh tell "nobody's ever confirmed this" from "an
+    // admin/bot already confirmed this, recently" and skip overwriting
+    // name/location in the second case. Null means OSM is still
+    // authoritative (never confirmed).
+    nameLocationDecidedAt: timestamp("name_location_decided_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
