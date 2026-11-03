@@ -1,16 +1,14 @@
-import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '@/auth-context';
 
+// No "apply to be admin" here anymore (API.md decision #8) - admins
+// promote users directly (PATCH /v1/admin/users/{id}); the first admin
+// is set from the command line.
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, loading, signOut, applyForAdmin } = useAuth();
-  const [description, setDescription] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { user, loading, signOut } = useAuth();
 
   if (loading) return <View style={styles.container} />;
 
@@ -25,52 +23,12 @@ export default function ProfileScreen() {
     );
   }
 
-  const submitAdminApplication = async () => {
-    if (submitting || !description.trim()) return;
-    setSubmitting(true);
-    setError(null);
-    const result = await applyForAdmin(description);
-    setSubmitting(false);
-    if (result.error) setError(result.error);
-    else {
-      setMessage('Your admin application is pending review.');
-      setDescription('');
-    }
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.card}>
         <Text style={styles.title}>{user.name}</Text>
         <Text style={styles.subtitle}>{user.email}</Text>
         {user.isAdmin && <Text style={styles.adminBadge}>Admin</Text>}
-
-        {!user.isAdmin && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Apply to be an admin</Text>
-            <Text style={styles.subtitle}>
-              Admin applications go to the existing admin team for approval - there&apos;s no automated check, so tell
-              them why.
-            </Text>
-            <TextInput
-              style={styles.textarea}
-              value={description}
-              onChangeText={setDescription}
-              placeholder="Why should you be an admin?"
-              placeholderTextColor="#6C7177"
-              multiline
-              numberOfLines={3}
-            />
-            {message && <Text style={styles.success}>{message}</Text>}
-            {error && <Text style={styles.error}>{error}</Text>}
-            <Pressable
-              style={[styles.submitButton, (submitting || !description.trim()) && styles.submitButtonDisabled]}
-              onPress={submitAdminApplication}
-            >
-              <Text style={styles.submitButtonText}>{submitting ? 'Submitting…' : 'Apply'}</Text>
-            </Pressable>
-          </View>
-        )}
 
         {user.isAdmin && (
           <Pressable style={styles.linkButton} onPress={() => router.push('/admin')}>
@@ -106,24 +64,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
   },
-  section: { gap: 10, marginTop: 10, borderTopWidth: 1, borderTopColor: '#2C3034', paddingTop: 16 },
-  sectionTitle: { color: '#F4F4F2', fontSize: 15, fontWeight: '700' },
-  textarea: {
-    borderWidth: 1,
-    borderColor: '#2C3034',
-    backgroundColor: '#1B1E21',
-    color: '#F4F4F2',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  success: { color: ACCENT, fontSize: 13 },
-  error: { color: '#E9643A', fontSize: 13 },
   submitButton: { backgroundColor: ACCENT, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
-  submitButtonDisabled: { opacity: 0.5 },
   submitButtonText: { color: '#111315', fontWeight: '700', fontSize: 14 },
   linkButton: { marginTop: 8 },
   linkButtonText: { color: ACCENT, fontSize: 14, fontWeight: '600' },

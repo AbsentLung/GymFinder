@@ -446,7 +446,8 @@ export function SubmitGymForm({
     try {
       const res = await fetch(`${API_BASE_URL}/api/gyms/submissions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        credentials: 'include',
         body: JSON.stringify({ name, lat: location.lat, lng: location.lng, description }),
       });
       if (!res.ok) throw new Error(`Submit gym failed: ${res.status}`);
@@ -600,7 +601,8 @@ export function SuggestEditForm({
     try {
       const res = await fetch(`${API_BASE_URL}/api/gyms/${gym.id}/edit-request`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        credentials: 'include',
         body: JSON.stringify({ field: field.key, newValue, description }),
       });
       if (!res.ok) throw new Error(`Edit request failed: ${res.status}`);
