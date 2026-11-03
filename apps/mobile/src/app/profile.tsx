@@ -3,9 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '@/auth-context';
 
-// No "apply to be admin" here anymore (API.md decision #8) - admins
-// promote users directly (PATCH /v1/admin/users/{id}); the first admin
-// is set from the command line.
+// No "apply to be admin" anymore - admins promote users directly.
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, loading, signOut } = useAuth();
