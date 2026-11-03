@@ -1,14 +1,6 @@
-// API.md 2.7: "When a request's status changes, the worker sends an
-// Expo push notification to the user's tokens... Pushes go through the
-// queue like other slow work." Expo's push API needs no API key for a
-// basic send (https://docs.expo.dev/push-notifications/sending-notifications/)
-// - just a valid Expo push token per recipient.
-//
-// Not live-verified against a real device/Expo push token this
-// session (none available in this environment) - the HTTP call itself
-// is built exactly to Expo's documented request shape, but delivery
-// hasn't been confirmed end-to-end the way every other job in this
-// module has been. Flagged rather than silently assumed working.
+// Sends an Expo push notification when a request's status changes -
+// goes through the queue like other slow work. Not live-verified
+// against a real device (none available here).
 import { eq } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { requests, pushTokens } from "../db/schema.js"
@@ -45,7 +37,7 @@ export async function processPushNotify({ requestId }: { requestId: number }): P
   if (!message) return
 
   const tokens = await db.select({ token: pushTokens.token }).from(pushTokens).where(eq(pushTokens.userId, request.userId))
-  if (tokens.length === 0) return // signed-out/no-push-registered users poll instead (API.md 2.7).
+  if (tokens.length === 0) return // no push registered - these users poll instead.
 
   await fetch(EXPO_PUSH_URL, {
     method: "POST",

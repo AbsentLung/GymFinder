@@ -1,7 +1,5 @@
-// API.md 2.5 - push-token registration (for Expo push notifications on
-// request status changes, src/jobs/push.ts) and account deletion.
-// GET /v1/me/requests lives in src/routes/requests.ts instead, next to
-// the serializeRequest it shares with every other request endpoint.
+// Push-token registration and account deletion. GET /v1/me/requests
+// lives in routes/requests.ts, next to serializeRequest.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
 import { eq, and } from "drizzle-orm"
@@ -17,10 +15,8 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: { body: z.object({ expoPushToken: z.string().min(1), platform: z.enum(["ios", "android", "web"]) }) },
     },
     async (request, reply) => {
-      // Unique on token alone - a reinstall under the same account (or,
-      // in principle, a different account on the same device) moves the
-      // existing row to the new owner rather than erroring or
-      // duplicating.
+      // Unique on token alone - a reinstall moves the row to its new
+      // owner rather than erroring or duplicating.
       await db
         .insert(pushTokens)
         .values({ userId: request.sessionUser!.id, token: request.body.expoPushToken, platform: request.body.platform })
@@ -45,14 +41,8 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
   )
 
   app.delete("/v1/me", { preHandler: requireUser }, async (request) => {
-    // A single DELETE, relying on the FK actions already declared in
-    // src/db/schema.ts to do the right thing per table: session/account/
-    // verification (Better Auth's own, cascade), push_tokens (cascade),
-    // reviews (cascade - API.md 2.5: "reviews are removed"), requests
-    // (set null - "requests are kept but unlinked"). gym_changes never
-    // references users at all, so nothing to do there. "There are no
-    // chats to delete" (API.md 2.5) - chats live only in the cache with
-    // their own TTL, never tied to a user id in the first place.
+    // A single DELETE - the FK actions already on schema.ts handle each
+    // table (cascade for reviews/push_tokens, set null for requests).
     await db.delete(users).where(eq(users.id, request.sessionUser!.id))
     return { ok: true }
   })
