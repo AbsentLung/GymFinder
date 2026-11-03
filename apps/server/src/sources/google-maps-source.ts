@@ -16,6 +16,21 @@ import type { SourceInterface, RawGym } from "../interfaces/source.js"
 
 const RESULT_LIMIT = 20
 
+// STACK_AND_SCHEMA.md 1.9/2.9 (decided 2026-11-01): "never pay for
+// proxies or scraping APIs... if Google starts blocking our AWS IPs,
+// the sweep workers back off (slower rate, longer pauses)". Thrown
+// distinctly from a generic scrape failure so sweep.ts's caller can
+// tell "Google is blocking us, slow down" apart from "this one request
+// errored" and actually implement the backoff, not just retry at the
+// same rate.
+export class GoogleMapsBlockedError extends Error {}
+
+function isBlockedPage(url: string, bodyText: string): boolean {
+  if (url.includes("consent.google.com") || url.includes("/sorry/")) return true
+  const lower = bodyText.toLowerCase()
+  return lower.includes("unusual traffic") || lower.includes("before you continue to maps") || lower.includes("recaptcha")
+}
+
 export const googleMapsSource: SourceInterface = {
   name: "google_maps",
   async findGymsInArea(bbox): Promise<RawGym[]> {
@@ -30,6 +45,11 @@ export const googleMapsSource: SourceInterface = {
         timeout: 10000,
       })
       await page.waitForTimeout(2000) // result list renders async
+
+      if (isBlockedPage(page.url(), await page.locator("body").innerText().catch(() => ""))) {
+        throw new GoogleMapsBlockedError(`Blocked by Google at ${page.url()}`)
+      }
+
       const links = await page.locator('a[href*="/maps/place/"]').all()
       const results: RawGym[] = []
       for (const link of links.slice(0, RESULT_LIMIT)) {
