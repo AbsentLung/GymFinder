@@ -151,15 +151,29 @@ export const gymsRoutes: FastifyPluginAsyncZod = async (app) => {
       const userId = request.sessionUser!.id
       const [existing] = await db.select({ id: reviews.id }).from(reviews).where(and(eq(reviews.gymId, id), eq(reviews.userId, userId)))
       // One review per user per gym (API.md decision #9) - a second
-      // attempt is a 409 pointing at PUT, not a silent second row.
+      // attempt is a 409 pointing at PUT, not a silent second row. This
+      // check alone can't close the race between two quick POSTs (both
+      // can pass it before either inserts) - the catch below is what
+      // actually closes it, via reviews_gym_user_unique.
       if (existing) return reply.status(409).send({ error: "You've already reviewed this gym - use PUT to edit it" })
 
-      const [created] = await db
-        .insert(reviews)
-        .values({ gymId: id, userId, rating: request.body.rating, body: request.body.body ?? null })
-        .returning()
-      reply.status(201)
-      return serializeReview({ ...created, userName: null }, userId)
+      try {
+        const [created] = await db
+          .insert(reviews)
+          .values({ gymId: id, userId, rating: request.body.rating, body: request.body.body ?? null })
+          .returning()
+        reply.status(201)
+        return serializeReview({ ...created, userName: null }, userId)
+      } catch (e) {
+        // Postgres SQLSTATE, not an HTTP status - 23505 unique_violation
+        // (the race above), 23503 foreign_key_violation (gym doesn't
+        // exist - there's no pre-check for that, unlike the review-
+        // already-exists case). Both used to bubble up as a bare 500.
+        const code = (e as { code?: string }).code
+        if (code === "23505") return reply.status(409).send({ error: "You've already reviewed this gym - use PUT to edit it" })
+        if (code === "23503") return reply.status(404).send({ error: "Gym not found" })
+        throw e
+      }
     }
   )
 
