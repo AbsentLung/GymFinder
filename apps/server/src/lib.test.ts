@@ -16,6 +16,8 @@ import {
   requireDescription,
   geohashToBounds,
   geohash5ChildrenOf,
+  encodeGeohash,
+  geohash5TilesCoveringBbox,
 } from "./lib.js"
 
 describe("looksLikeRealCoordinates", () => {
@@ -238,6 +240,47 @@ describe("geohashToBounds", () => {
   })
   it("rejects an invalid character", () => {
     expect(() => geohashToBounds("qwa")).toThrow() // 'a' is not in the base32 alphabet
+  })
+})
+
+describe("encodeGeohash", () => {
+  it("matches PostGIS's own ST_GeoHash for the real Bali point confirmed live in Phase 3", () => {
+    expect(encodeGeohash(-8.6501, 115.1385, 5)).toBe("qw3yu")
+  })
+  it("round-trips through geohashToBounds for an arbitrary real point", () => {
+    // Soma Fight Club, src/jobs/bot-review.ts's own live-verified test
+    // gym this session.
+    const lat = -8.6436827
+    const lng = 115.1573287
+    const hash = encodeGeohash(lat, lng, 5)
+    const bounds = geohashToBounds(hash)
+    expect(bounds.minLat).toBeLessThanOrEqual(lat)
+    expect(bounds.maxLat).toBeGreaterThanOrEqual(lat)
+    expect(bounds.minLng).toBeLessThanOrEqual(lng)
+    expect(bounds.maxLng).toBeGreaterThanOrEqual(lng)
+  })
+})
+
+describe("geohash5TilesCoveringBbox", () => {
+  it("covers a bbox the size of a few geohash5 cells with no gaps", () => {
+    const bounds = geohashToBounds("qw3yu")
+    const latSpan = bounds.maxLat - bounds.minLat
+    const lngSpan = bounds.maxLng - bounds.minLng
+    // A bbox 3 cells wide and 3 cells tall, centered on qw3yu.
+    const bbox = {
+      minLat: bounds.minLat - latSpan,
+      maxLat: bounds.maxLat + latSpan,
+      minLng: bounds.minLng - lngSpan,
+      maxLng: bounds.maxLng + lngSpan,
+    }
+    const tiles = geohash5TilesCoveringBbox(bbox)
+    expect(tiles).toContain("qw3yu")
+    // Every corner of the bbox must land in a returned tile - the real
+    // failure mode a too-large step size would produce is a corner
+    // silently falling outside every returned cell.
+    expect(tiles).toContain(encodeGeohash(bbox.minLat, bbox.minLng, 5))
+    expect(tiles).toContain(encodeGeohash(bbox.maxLat, bbox.maxLng, 5))
+    expect(tiles.length).toBeGreaterThanOrEqual(9) // at least the 3x3 grid of cells
   })
 })
 

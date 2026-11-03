@@ -4,7 +4,12 @@
 // surface, so the real signatures came from there.
 import { PgBoss } from "pg-boss"
 import type { Job } from "pg-boss"
-import type { QueueInterface, JobOptions, JobHandler } from "../interfaces/queue.js"
+import type { QueueInterface, JobOptions, JobHandler, JobPriority } from "../interfaces/queue.js"
+
+// pg-boss orders by `priority DESC` (confirmed by reading
+// pg-boss/dist/plans.js directly, same discipline as the exclusive-
+// policy bug below) - higher number runs first.
+const PRIORITY_RANK: Record<JobPriority, number> = { low: 1, normal: 5, high: 10 }
 
 export class PgBossQueue implements QueueInterface {
   private boss: PgBoss
@@ -45,7 +50,7 @@ export class PgBossQueue implements QueueInterface {
     // an integer" rather than treating it as unset (caught live) - keys
     // can only be included when they actually have a value.
     const id = await this.boss.send(queueName, payload, {
-      ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
+      ...(opts.priority !== undefined ? { priority: PRIORITY_RANK[opts.priority] } : {}),
       ...(opts.delay !== undefined ? { startAfter: new Date(Date.now() + opts.delay) } : {}),
       // pg-boss's dedup mechanism is `singletonKey`, not an `id` you
       // supply - this is where the interface's generic `jobId` name

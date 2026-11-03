@@ -4,8 +4,20 @@
 // code (routes, workers) only ever imports `queue` from
 // src/queue/index.ts, never pg-boss or bullmq directly - that's what
 // keeps it mode-agnostic (DESIGN_DISCUSSION.md 6.1).
+// Named levels, not a raw number - caught before anything actually used
+// this field (the seed CLI, scripts/seed.ts, is the first caller):
+// pg-boss's own priority is "higher number processed first," while
+// BullMQ's is the OPPOSITE ("lower number processed first," and - more
+// surprising - an unset priority is treated as MORE urgent than any
+// explicitly prioritized job, not neutral). A single numeric value
+// passed straight through would silently mean opposite things in demo
+// vs scale mode. Each implementation maps these three levels to its own
+// correct numbers internally (src/queue/pgboss-queue.ts,
+// src/queue/bullmq-queue.ts).
+export type JobPriority = "low" | "normal" | "high"
+
 export interface JobOptions {
-  priority?: number
+  priority?: JobPriority
   /** Delay before the job becomes eligible to run, in milliseconds. */
   delay?: number
   /**

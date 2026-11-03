@@ -245,3 +245,72 @@ export function geohashToBounds(geohash: string): GeohashBounds {
 export function geohash5ChildrenOf(geohash4: string): string[] {
   return GEOHASH_BASE32.split("").map((c) => geohash4 + c)
 }
+
+// The forward direction geohashToBounds doesn't need (PostGIS's
+// ST_GeoHash already covers lat/lng -> geohash for every column in this
+// app) but the seeding CLI does (scripts/seed.ts) - turning a
+// destination's bounding box into the geohash5 tiles that cover it
+// needs encoding arbitrary points, not just decoding a geohash we
+// already have. Standard geohash encode: the mirror of
+// geohashToBounds's decode loop, narrowing the same lat/lng ranges but
+// building up bits instead of reading them off.
+export function encodeGeohash(lat: number, lng: number, precision = 5): string {
+  let minLat = -90
+  let maxLat = 90
+  let minLng = -180
+  let maxLng = 180
+  let isEvenBit = true
+  let bit = 0
+  let charIdx = 0
+  let geohash = ""
+
+  while (geohash.length < precision) {
+    if (isEvenBit) {
+      const mid = (minLng + maxLng) / 2
+      if (lng >= mid) {
+        charIdx |= 1 << (4 - bit)
+        minLng = mid
+      } else {
+        maxLng = mid
+      }
+    } else {
+      const mid = (minLat + maxLat) / 2
+      if (lat >= mid) {
+        charIdx |= 1 << (4 - bit)
+        minLat = mid
+      } else {
+        maxLat = mid
+      }
+    }
+    isEvenBit = !isEvenBit
+    if (bit < 4) {
+      bit++
+    } else {
+      geohash += GEOHASH_BASE32[charIdx]
+      bit = 0
+      charIdx = 0
+    }
+  }
+  return geohash
+}
+
+// Grid-walks a bbox at half a geohash5 cell's own span - oversamples on
+// purpose (duplicates are deduped by the Set) so a thin sliver of a
+// cell near the bbox's edge is never skipped the way stepping by one
+// full cell-width could, since geohash5's grid isn't aligned to the
+// bbox's own corner.
+export function geohash5TilesCoveringBbox(bbox: Bbox): string[] {
+  const sample = geohashToBounds(encodeGeohash(bbox.minLat, bbox.minLng, 5))
+  const latStep = (sample.maxLat - sample.minLat) / 2
+  const lngStep = (sample.maxLng - sample.minLng) / 2
+  const tiles = new Set<string>()
+
+  for (let lat = bbox.minLat; lat <= bbox.maxLat; lat += latStep) {
+    for (let lng = bbox.minLng; lng <= bbox.maxLng; lng += lngStep) {
+      tiles.add(encodeGeohash(lat, lng, 5))
+    }
+    tiles.add(encodeGeohash(lat, bbox.maxLng, 5))
+  }
+  tiles.add(encodeGeohash(bbox.maxLat, bbox.maxLng, 5))
+  return [...tiles]
+}
