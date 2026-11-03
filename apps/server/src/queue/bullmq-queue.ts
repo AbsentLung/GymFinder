@@ -42,6 +42,12 @@ export class BullMqQueue implements QueueInterface {
       priority: opts.priority,
       delay: opts.delay,
       jobId: opts.jobId,
+      // BullMQ keeps a finished job's id by default - without this,
+      // tile-refresh:<cell> stays "already exists" in Redis forever
+      // after its first run, so every later refresh request for that
+      // cell is silently dropped, not re-queued.
+      removeOnComplete: true,
+      removeOnFail: true,
     })
     return { id: job.id ?? null }
   }

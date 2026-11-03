@@ -3,6 +3,8 @@ import {
   looksLikeRealCoordinates,
   isDuplicateMatch,
   isWithinStaleWindow,
+  isFetchRowFresh,
+  FAILED_FETCH_BACKOFF_MS,
   isBboxCovered,
   getCountryCurrency,
   convertToUsdCents,
@@ -54,6 +56,27 @@ describe("isWithinStaleWindow", () => {
   it("is stale just over the window", () => {
     const now = Date.now()
     expect(isWithinStaleWindow(new Date(now - oneWeekMs - 1000).toISOString(), oneWeekMs, now)).toBe(false)
+  })
+})
+
+describe("isFetchRowFresh", () => {
+  const staleMs = 7 * 24 * 60 * 60 * 1000
+  it("is not fresh when there's no row at all", () => {
+    expect(isFetchRowFresh(undefined, staleMs)).toBe(false)
+  })
+  it("uses the normal stale window for an ok row", () => {
+    const now = Date.now()
+    expect(isFetchRowFresh({ lastFetchedAt: new Date(now - staleMs + 1000).toISOString(), status: "ok" }, staleMs, now)).toBe(true)
+  })
+  it("uses the short backoff window for a failed row, even well inside the normal window", () => {
+    const now = Date.now()
+    const row = { lastFetchedAt: new Date(now - FAILED_FETCH_BACKOFF_MS - 1000).toISOString(), status: "failed" }
+    expect(isFetchRowFresh(row, staleMs, now)).toBe(false) // backoff elapsed - retry allowed
+  })
+  it("a just-failed row is still fresh (still backing off), not stale for a week", () => {
+    const now = Date.now()
+    const row = { lastFetchedAt: new Date(now - 1000).toISOString(), status: "failed" }
+    expect(isFetchRowFresh(row, staleMs, now)).toBe(true)
   })
 })
 

@@ -21,6 +21,21 @@ export function isWithinStaleWindow(lastFetchedAt: string | Date, staleMs: numbe
   return nowMs - new Date(lastFetchedAt).getTime() < staleMs
 }
 
+// A failed fetch (Overpass or the sweep scraper) shouldn't hide a
+// cell's gyms, or block a retry, for the full week/normal staleness
+// window - writing last_fetched_at = now() with status = 'failed' on
+// error made a single Overpass 429 or 502 look "fresh" for a week.
+export const FAILED_FETCH_BACKOFF_MS = 15 * 60 * 1000
+
+export function isFetchRowFresh(
+  row: { lastFetchedAt: string | Date; status: string } | undefined,
+  staleMs: number,
+  nowMs = Date.now()
+): boolean {
+  if (!row) return false
+  return isWithinStaleWindow(row.lastFetchedAt, row.status === "failed" ? FAILED_FETCH_BACKOFF_MS : staleMs, nowMs)
+}
+
 export interface Bbox {
   minLat: number
   minLng: number
