@@ -55,7 +55,7 @@ Three different products, worth distinguishing:
 
 **Decided: v1 is Bali only.** Resolves the open "how does the sync job know which cities to cover" question from earlier — there's exactly one bounding box to configure, and the 15-minute Overpass polling cadence has enormous headroom against the fair-use budget at a single city. Expanding to a second city is a config change (one more bounding box in whatever `launch_cities` list the import job reads), not a schema change — nothing in the design above assumed one city specifically.
 
-**Superseded by `docs/gym-data-design.md`: there's no fixed city list anymore, launch or otherwise.** Photon-powered location search means a user can search any city or area, not just ones pre-configured in advance — the per-area `fetched_areas`/`last_fetched` tracking there replaces "which cities do we cover" entirely. The country → region navigation this originally implied (world map → Indonesia → Bali) is gone too, replaced by a single search box on the home screen routing straight to one generic `/map` screen with the searched area's bounds. Bali isn't special anymore; it's just the first area that happened to get searched.
+**Superseded by `gym-data-design.md`: there's no fixed city list anymore, launch or otherwise.** Photon-powered location search means a user can search any city or area, not just ones pre-configured in advance — the per-area `fetched_areas`/`last_fetched` tracking there replaces "which cities do we cover" entirely. The country → region navigation this originally implied (world map → Indonesia → Bali) is gone too, replaced by a single search box on the home screen routing straight to one generic `/map` screen with the searched area's bounds. Bali isn't special anymore; it's just the first area that happened to get searched.
 
 ## A couple of technical notes for later
 
@@ -403,7 +403,7 @@ flowchart TB
 
 ## Caching gym metadata with Redis, designed for scale now
 
-**Superseded on build order, not on design: see `docs/gym-data-design.md`.** Redis is now deferred until production rather than built immediately — the schema/cache-key reasoning below is still the right design for when that happens, it just isn't being built yet.
+**Superseded on build order, not on design: see `gym-data-design.md`.** Redis is now deferred until production rather than built immediately — the schema/cache-key reasoning below is still the right design for when that happens, it just isn't being built yet.
 
 Decided: Redis goes in now, in front of `gym_metadata`, built so it doesn't need reworking as traffic grows. The design below splits into pieces that each age differently — the schema and cache-key shape are the parts that are expensive to change later and are locked in now; the invalidation *trigger* mechanism is deliberately the one piece built to swap out without touching anything else, since that's the part that actually depends on how much write-path complexity shows up later.
 
@@ -566,7 +566,7 @@ flowchart TB
 
 ## Keeping the OSM seed fresh: no webhook exists, so it's a scheduled job
 
-**Superseded by `docs/gym-data-design.md`: the scheduled-per-launch-city job below is replaced by a lazy, per-area, on-lookup staleness check.** Once location search lets someone search any area, there's no fixed `launch_cities` list left to schedule against — the per-area `last_fetched` check generalizes to cover that, including Bali itself (now just "an area," fetched the same lazy way as any other). The OSM-push-mechanism research below is still accurate and worth keeping; the scheduling decision it led to isn't current anymore.
+**Superseded by `gym-data-design.md`: the scheduled-per-launch-city job below is replaced by a lazy, per-area, on-lookup staleness check.** Once location search lets someone search any area, there's no fixed `launch_cities` list left to schedule against — the per-area `last_fetched` check generalizes to cover that, including Bali itself (now just "an area," fetched the same lazy way as any other). The OSM-push-mechanism research below is still accurate and worth keeping; the scheduling decision it led to isn't current anymore.
 
 **OSM has no push mechanism — checked directly, not assumed.** There's no webhook registration, no way for OpenStreetMap to call out to our server when a gym gets edited. Everything it offers is pull-based: Overpass (what we're using), the raw minutely-diff replication feed, or third-party RSS-style watch services. Overpass itself already stays within a few minutes of the live OSM database on its own end, so we don't need to consume the raw diff feed ourselves — we just need to *ask* on a schedule.
 

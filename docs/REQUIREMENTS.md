@@ -1,6 +1,6 @@
 # Gym Finder Requirements
 
-Phase 1 of the [roadmap](https://github.com/AbsentLung/TravelApp/blob/main/README.md#roadmap). This doc says **what** Gym Finder must do, not **how**. Tool and API choices (map library, database, hosting, LLM, etc.) are decided in phase 2 (Design), so they are left out here on purpose. The only named services below are ones that are part of the requirement itself.
+Phase 1 of the [roadmap](./ROADMAP.md). This doc says **what** Gym Finder must do, not **how**. Tool and API choices (map library, database, hosting, LLM, etc.) are decided in phase 2 (Design), so they are left out here on purpose. The only named services below are ones that are part of the requirement itself.
 
 Each requirement has an ID so later docs (`DESIGN.md`, PRs, tests) can point at it.
 

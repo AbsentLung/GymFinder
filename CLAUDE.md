@@ -57,16 +57,16 @@ These were agreed with Joey. Follow them unless he changes them; update this fil
 
 ### Hosting
 - AWS (decided by Joey 2026-10-31; replaces the earlier Netlify + GCP e2-micro idea).
-- Demo mode stays near-free on a single small instance; scale mode moves to managed AWS services. Demo: Lightsail + Docker Compose, S3 + CloudFront + Route 53. Scale: ECS Fargate, RDS Postgres, ElastiCache, AWS CDK. See STACK_AND_SCHEMA.md.
+- Demo mode stays near-free on a single small instance; scale mode moves to managed AWS services. Demo: Lightsail + Docker Compose, S3 + CloudFront + Route 53. Scale: ECS Fargate, RDS Postgres, ElastiCache, AWS CDK. See docs/STACK_AND_SCHEMA.md.
 - Keep config in env vars and keep AWS-specific code behind interfaces, so services can be swapped.
 
-### Stack and schema (decided 2026-11-01/02, details in STACK_AND_SCHEMA.md)
+### Stack and schema (decided 2026-11-01/02, details in docs/STACK_AND_SCHEMA.md)
 - TypeScript everywhere: Fastify API + workers, npm-workspaces monorepo, Zod schemas shared with the app. Drizzle ORM + migrations. Better Auth (users in our Postgres): email, Google and Facebook at launch; add Sign in with Apple before the iOS App Store release (Apple requires it).
-- API contract: API.md (REST under `/v1`, Zod schemas, 202 + polling for slow work).
+- API contract: docs/API.md (REST under `/v1`, Zod schemas, 202 + polling for slow work).
 - Map: MapLibre with self-hosted Protomaps tiles. Never use the public OSM tile servers in production.
 - Scraper: Playwright in sweep workers. Never pay for proxies or scraping APIs.
 - Schema: PostGIS point + GIST + `geohash4` (loading) and `geohash5` (refresh/sweeps) columns; `tile_fetches`; `gym_prices` (current verified + unverified price per kind, no history, `last_seen_at`); `requests` + `gym_changes`; `gym_source_refs`; `users.role`; bigint IDs.
 - Price verification: web price = verified; Google Maps menu photo posted < 1 year ago = verified; otherwise admin.
-- Non-price verification (REQUIREMENTS.md FR-25 to FR-27): new gym verified if in OSM, on Google Maps or on its own website within ~50 m with a matching name and not a duplicate; name/address/hours/categories/drop-ins/trial verified if found on the gym's website or Google Maps listing; closing/removing a gym always needs an admin. Bot rejects spam, missing name/location, impossible locations, exact duplicates. Pending non-price changes stay hidden until approved.
+- Non-price verification (docs/REQUIREMENTS.md FR-25 to FR-27): new gym verified if in OSM, on Google Maps or on its own website within ~50 m with a matching name and not a duplicate; name/address/hours/categories/drop-ins/trial verified if found on the gym's website or Google Maps listing; closing/removing a gym always needs an admin. Bot rejects spam, missing name/location, impossible locations, exact duplicates. Pending non-price changes stay hidden until approved.
 - The chatbot may use our DB, the gym's website, its Google Maps page and web search; anything outside the gym's website or a recent menu photo is unverified.
 - Unverified prices are stored too (`verified_by` empty, at most one verified + one unverified row per gym per kind) and shown below verified ones. They come from user edits or from the chatbot finding a price somewhere unverified (e.g. a review). Only an admin can verify them; approving one makes it the verified row.
