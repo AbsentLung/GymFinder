@@ -374,6 +374,16 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
 
   if (proposed.kind === "field") {
     const column = FIELD_TO_COLUMN[proposed.field]
+    // Drizzle's sql`` expands a plain array interpolation into a value
+    // LIST, not a bound array - invalid for a text[] column. ARRAY[...]
+    // via sql.join is the form that actually binds a real array literal.
+    if (proposed.field === "categories") {
+      const categories = proposed.newValue as string[]
+      await tx.execute(
+        sql`UPDATE gyms SET categories = ARRAY[${sql.join(categories.map((c) => sql`${c}`), sql`, `)}]::text[] WHERE id = ${gymId}`
+      )
+      return
+    }
     // Re-stamps name_location_decided_at - a fresh decision, respected
     // by the weekly OSM refresh for another year.
     if (proposed.field === "name") {
