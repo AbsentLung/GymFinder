@@ -20,12 +20,18 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
   let isNew = false
   if (existing.rows[0]) {
     gymId = existing.rows[0].gym_id
-    // name/location: the source is treated as authoritative, same as
-    // the old demo's mergeGymsIntoDb. address/description: COALESCE,
+    // name/location: the source is authoritative EXCEPT within a year
+    // of an approved admin/bot decision on this gym's name or location
+    // (gyms.nameLocationDecidedAt, bot-review.ts's applyProposedChange)
+    // - without this check, next week's refresh silently undoes a
+    // correction someone just approved. address/description: COALESCE,
     // fill the gap only - never overwrite a better answer the bot/
     // admin/chat already gave.
     await db.execute(sql`
-      UPDATE gyms SET name = ${g.name}, location = ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326),
+      UPDATE gyms SET
+        name = CASE WHEN name_location_decided_at IS NULL OR name_location_decided_at < now() - interval '1 year' THEN ${g.name} ELSE name END,
+        location = CASE WHEN name_location_decided_at IS NULL OR name_location_decided_at < now() - interval '1 year'
+          THEN ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326) ELSE location END,
         address = COALESCE(address, ${g.address ?? null}), description = COALESCE(description, ${g.description ?? null})
       WHERE id = ${gymId}
     `)
@@ -38,15 +44,18 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
     // 2-pin map cluster) and fixed there the same way: check
     // name+proximity against every OTHER known gym before inserting,
     // same threshold the rest of this app uses for dedup.
+    // ORDER BY the point's own <-> distance to the gist index, not a
+    // haversine expression computed for every row - ST_DWithin first
+    // so the index actually gets used to prune, then <-> just for
+    // ORDER BY.
+    const point = sql`ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326)`
     const nearby = await db.execute<{ gym_id: number; name_similarity: number; distance_km: number }>(sql`
       SELECT r.gym_id, similarity(g.name, ${g.name}) AS name_similarity,
-        (6371 * acos(GREATEST(-1, LEAST(1,
-          cos(radians(${g.lat})) * cos(radians(ST_Y(g.location))) * cos(radians(ST_X(g.location)) - radians(${g.lng})) +
-          sin(radians(${g.lat})) * sin(radians(ST_Y(g.location)))
-        )))) AS distance_km
+        ST_Distance(g.location::geography, ${point}::geography) / 1000 AS distance_km
       FROM gym_source_refs r JOIN gyms g ON g.id = r.gym_id
       WHERE NOT (r.source = ${source} AND r.external_id = ${g.externalId})
-      ORDER BY distance_km ASC LIMIT 3
+        AND ST_DWithin(g.location::geography, ${point}::geography, 500)
+      ORDER BY g.location <-> ${point} ASC LIMIT 3
     `)
     const duplicate = nearby.rows.find((row) => isDuplicateMatch(row.distance_km, row.name_similarity))
 

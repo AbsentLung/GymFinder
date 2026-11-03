@@ -8,9 +8,10 @@ import { db } from "../db/index.js"
 import { gymChanges, gyms, requests, tileFetches } from "../db/schema.js"
 import { queue } from "../queue/index.js"
 import { requireUser } from "../auth-guard.js"
-import { requireDescription, GYM_CATEGORIES, isWithinStaleWindow } from "../lib.js"
+import { requireDescription, GYM_CATEGORIES, isFetchRowFresh } from "../lib.js"
 import { NON_PRICE_FIELDS, createGymChange } from "../jobs/bot-review.js"
 import type { ProposedChange } from "../jobs/bot-review.js"
+import { checkRateLimit } from "../rate-limit.js"
 
 const BOT_REVIEW_DEADLINE_MS = 10 * 60 * 1000
 const SWEEP_DEADLINE_MS = 60 * 60 * 1000
@@ -19,6 +20,11 @@ const SWEEP_DEADLINE_MS = 60 * 60 * 1000
 // than inventing a different one with no basis.
 const SWEEP_STALE_MS = 7 * 24 * 60 * 60 * 1000
 const GEOHASH5_PATTERN = /^[0-9b-hj-km-np-z]{5}$/
+// API.md 1.6: "Tight limits on sweeps and chat" - a sweep launches a
+// real browser and scrapes Google, unlike a plain read, so this one
+// had nothing at all before.
+const SWEEP_RATE_LIMIT_MAX = 5
+const SWEEP_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
 
 const sweepBodySchema = z.object({ geohash: z.string().regex(GEOHASH5_PATTERN, "must be a 5-character geohash") })
 
@@ -139,6 +145,8 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
     { preHandler: requireUser, schema: { body: sweepBodySchema } },
     async (request, reply) => {
       const { geohash } = request.body
+      const allowed = await checkRateLimit(`sweep:user:${request.sessionUser!.id}`, SWEEP_RATE_LIMIT_MAX, SWEEP_RATE_LIMIT_WINDOW_SECONDS)
+      if (!allowed) return reply.status(429).send({ error: "Too many sweeps - try again later" })
 
       // "A tile swept recently returns 200 with an already-completed
       // request" (API.md 2.4) - reusing tile_fetches' own (geohash,
@@ -148,7 +156,12 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
         .select()
         .from(tileFetches)
         .where(and(eq(tileFetches.geohash, geohash), eq(tileFetches.source, "google_maps")))
-      if (fetchRow && isWithinStaleWindow(fetchRow.lastFetchedAt, SWEEP_STALE_MS)) {
+      // status-aware: a failed sweep (Google blocked the scraper, a
+      // transient error) only blocks a retry for a short backoff, not
+      // the full week a real completed sweep does - this used to check
+      // only the date, so one failure made that cell permanently return
+      // the same failed request for 7 days.
+      if (isFetchRowFresh(fetchRow, SWEEP_STALE_MS)) {
         const [recent] = await db
           .select()
           .from(requests)
@@ -185,7 +198,8 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
         .insert(requests)
         .values({ userId: request.sessionUser!.id, kind: "sweep", deadline: new Date(Date.now() + SWEEP_DEADLINE_MS), input: { geohash } })
         .returning()
-      await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep:${geohash}` })
+      // "-" not ":" - BullMQ rejects a custom id containing a colon.
+      await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep-${geohash}` })
       reply.status(202)
       return serializeRequest(created.id)
     }
@@ -226,7 +240,8 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
           .insert(requests)
           .values({ userId: request.sessionUser!.id, kind: "sweep", deadline: new Date(Date.now() + SWEEP_DEADLINE_MS), input: { geohash } })
           .returning()
-        await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep:${geohash}` })
+        // "-" not ":" - BullMQ rejects a custom id containing a colon.
+      await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep-${geohash}` })
         return serializeRequest(created.id)
       }
 
