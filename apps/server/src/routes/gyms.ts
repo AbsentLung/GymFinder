@@ -54,7 +54,13 @@ async function fetchGymDetail(id: number) {
     categories: gym.categories ?? [],
     description: gym.description,
     acceptsDropIn: gym.accepts_drop_in,
-    trial: { available: gym.has_trial ?? false, details: trialDetails ?? null },
+    // null, not coerced to false - "we don't know" and "confirmed no
+    // trial" are different facts (same reasoning as acceptsDropIn in
+    // apps/mobile/src/components/gym-panels.tsx: "no price means not
+    // known, never no"). Caught wiring up the app's own TrialSection,
+    // which needs that distinction to show "Not known yet" instead of
+    // a false "No trial."
+    trial: { available: gym.has_trial, details: trialDetails ?? null },
     openingHours: openingHours ?? null,
     details: restDetails,
     prices: prices.map((p) => ({

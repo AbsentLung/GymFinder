@@ -329,6 +329,22 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
 
   if (proposed.kind === "field") {
     const column = FIELD_TO_COLUMN[proposed.field]
+    // Caught live: Drizzle's sql`` template expands a plain JS array
+    // interpolation into a parenthesized value LIST ("($1, $2)"), not a
+    // single bound array parameter - valid for an IN-clause, not for
+    // assigning to a text[] column, and casting the result afterward
+    // doesn't fix it since the expansion already happened wrong by
+    // then. ARRAY[...] built from sql.join is the form that actually
+    // binds each element as its own parameter inside a real array
+    // literal (confirmed live, including the empty-array case - a
+    // categories edit that clears every tag).
+    if (proposed.field === "categories") {
+      const categories = proposed.newValue as string[]
+      await tx.execute(
+        sql`UPDATE gyms SET categories = ARRAY[${sql.join(categories.map((c) => sql`${c}`), sql`, `)}]::text[] WHERE id = ${gymId}`
+      )
+      return
+    }
     await tx.execute(sql`UPDATE gyms SET ${sql.raw(column)} = ${proposed.newValue} WHERE id = ${gymId}`)
     return
   }
