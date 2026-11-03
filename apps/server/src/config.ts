@@ -1,7 +1,5 @@
-// Read once at startup, exported as a frozen value - every interface
-// factory below reads THIS, never `process.env.MODE` directly, so
-// there is exactly one place that branches on mode (DESIGN_DISCUSSION.md
-// 6.1: "no if (scaleMode) checks outside the factory").
+// Read once at startup - every factory reads this, never process.env.MODE
+// directly, so there's exactly one place that branches on mode.
 export type Mode = "demo" | "scale"
 
 function readMode(): Mode {

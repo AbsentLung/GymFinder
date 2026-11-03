@@ -1,6 +1,5 @@
-// Ported from the vibe-coded demo's fetchOverpassGyms (server/index.js) -
-// same query, same retry/backoff, same osmTagsToGymFields enrichment,
-// just typed and behind the SourceInterface instead of a bare function.
+// Ported from the vibe-coded demo's fetchOverpassGyms - same query/retry,
+// now behind SourceInterface.
 import { osmTagsToGymFields } from "../lib.js"
 import type { SourceInterface, RawGym } from "../interfaces/source.js"
 

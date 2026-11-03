@@ -1,19 +1,10 @@
-// STACK_AND_SCHEMA.md 1.2: "The interface only exposes what both
-// support: add(queue, payload, {priority, delay, jobId}),
-// process(queue, handler, {concurrency}), schedule(cron)." Business
-// code (routes, workers) only ever imports `queue` from
-// src/queue/index.ts, never pg-boss or bullmq directly - that's what
-// keeps it mode-agnostic (DESIGN_DISCUSSION.md 6.1).
+// Business code only imports `queue` from src/queue/index.ts, never
+// pg-boss or bullmq directly - keeps it mode-agnostic.
 export interface JobOptions {
   priority?: number
   /** Delay before the job becomes eligible to run, in milliseconds. */
   delay?: number
-  /**
-   * Dedup key ("merge duplicate jobs (same tile)", DESIGN_DISCUSSION.md
-   * 5.3) - adding a job with a jobId that's already active/queued is a
-   * no-op rather than a second job. Maps to pg-boss's `singletonKey` in
-   * demo mode and BullMQ's own `jobId` in scale mode.
-   */
+  /** Dedup key - adding a job with a jobId already active/queued is a no-op. */
   jobId?: string
 }
 

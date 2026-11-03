@@ -1,7 +1,5 @@
-// Demo mode's QueueInterface, confirmed against pg-boss's own shipped
-// .d.ts files (node_modules/pg-boss/dist/types.d.ts), not memory - the
-// README's example code is older-style than the actual current API
-// surface, so the real signatures came from there.
+// Demo mode's QueueInterface, confirmed against pg-boss's own .d.ts
+// files - its README's example code is out of date with the real API.
 import { PgBoss } from "pg-boss"
 import type { Job } from "pg-boss"
 import type { QueueInterface, JobOptions, JobHandler } from "../interfaces/queue.js"
@@ -22,20 +20,11 @@ export class PgBossQueue implements QueueInterface {
     await this.boss.stop()
   }
 
-  // `exclusive` policy is what actually makes singletonKey dedupe
-  // anything - pg-boss's default queue policy ('standard') accepts a
-  // singletonKey argument without error but doesn't enforce any
-  // uniqueness on it at all, so two `add()` calls with the same jobId
-  // silently queued two separate jobs instead of merging.
-  //
-  // But `exclusive` ALSO coalesces jobs with NO singletonKey onto the
-  // same empty-string slot - a queue whose jobs are each independent
-  // (nothing to dedupe) and never pass a jobId would get wrongly
-  // serialized to one in-flight job at a time, silently dropping every
-  // other `send` while one is queued or running. Opting queues in by
-  // name, rather than applying `exclusive` everywhere, is what avoids
-  // that trap for whatever's added next - add a queue here only once
-  // every one of its `send`s actually supplies a jobId.
+  // `exclusive` is what makes singletonKey actually dedupe - pg-boss's
+  // default `standard` policy accepts it but enforces no uniqueness.
+  // But `exclusive` also serializes any queue with NO singletonKey to
+  // one job at a time, silently dropping the rest. Opt queues in here
+  // only once every `send` to them supplies a jobId.
   private static readonly SINGLETON_QUEUES = new Set(["tile-refresh"])
 
   private async ensureQueue(name: string) {
@@ -46,16 +35,12 @@ export class PgBossQueue implements QueueInterface {
 
   async add<T extends Record<string, unknown>>(queueName: string, payload: T, opts: JobOptions = {}) {
     await this.ensureQueue(queueName)
-    // pg-boss's own arg-checking rejects `priority: undefined` as "not
-    // an integer" rather than treating it as unset (caught live) - keys
-    // can only be included when they actually have a value.
+    // pg-boss rejects `priority: undefined` as "not an integer" - keys
+    // can only be included when they have a value.
     const id = await this.boss.send(queueName, payload, {
       ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
       ...(opts.delay !== undefined ? { startAfter: new Date(Date.now() + opts.delay) } : {}),
-      // pg-boss's dedup mechanism is `singletonKey`, not an `id` you
-      // supply - this is where the interface's generic `jobId` name
-      // (STACK_AND_SCHEMA.md 1.2's literal wording) maps to pg-boss's
-      // own concept for it.
+      // pg-boss's dedup mechanism is `singletonKey`, not a supplied id.
       ...(opts.jobId !== undefined ? { singletonKey: opts.jobId } : {}),
     })
     return { id }

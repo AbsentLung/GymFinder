@@ -1,10 +1,7 @@
 import { Redis } from "ioredis"
 import type { CacheInterface } from "../interfaces/cache.js"
 
-// Scale mode's CacheInterface. Not live-tested this session (no Redis
-// running here) - ioredis's get/set/setex/del are standard enough that
-// this is low-risk, but worth a real run before trusting it in
-// production, same caveat as bullmq-queue.ts.
+// Scale mode's CacheInterface. Not live-tested (no Redis running here).
 export class RedisCache implements CacheInterface {
   private client: Redis
 

@@ -1,7 +1,5 @@
-// DESIGN_DISCUSSION.md "Pluggable data sources" - Overpass and the
-// Google Maps scraper (and later Places/Foursquare/regional sources,
-// OOS-1) all implement this, so sweeps/refresh/coverage code never
-// hardcodes which one it's calling.
+// Overpass and the Google Maps scraper both implement this, so
+// sweep/refresh code never hardcodes which one it's calling.
 export interface RawGym {
   osmId?: string
   name: string

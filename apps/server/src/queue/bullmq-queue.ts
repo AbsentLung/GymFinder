@@ -1,8 +1,6 @@
-// Scale mode's QueueInterface. Not live-tested in this session (no
-// Redis running here) - confirmed against BullMQ's own shipped .d.ts
-// files for the Queue/Worker constructor and JobsOptions shapes, same
-// as the pg-boss side, but this one still needs a real Redis to
-// exercise before trusting it in production.
+// Scale mode's QueueInterface. Not live-tested (no Redis running here)
+// - confirmed against BullMQ's own .d.ts files, but still needs a real
+// Redis run before trusting it in production.
 import { Queue, Worker, type ConnectionOptions } from "bullmq"
 import { Redis } from "ioredis"
 import type { QueueInterface, JobOptions, JobHandler } from "../interfaces/queue.js"
@@ -42,10 +40,8 @@ export class BullMqQueue implements QueueInterface {
       priority: opts.priority,
       delay: opts.delay,
       jobId: opts.jobId,
-      // BullMQ keeps a finished job's id by default - without this,
-      // tile-refresh:<cell> stays "already exists" in Redis forever
-      // after its first run, so every later refresh request for that
-      // cell is silently dropped, not re-queued.
+      // BullMQ keeps a finished job's id by default - without this, a
+      // cell's custom id stays "already exists" forever after one run.
       removeOnComplete: true,
       removeOnFail: true,
     })

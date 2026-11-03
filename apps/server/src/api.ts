@@ -1,8 +1,6 @@
-// API entry point - fast things only (reads, auth, accepting requests).
-// Anything slow goes through the queue and is handled by worker.ts
-// (DESIGN_DISCUSSION.md Option B). Demo mode can run both entry points
-// in one process (see package.json's "dev" script); scale mode deploys
-// them as separate services.
+// API entry point - fast things only; anything slow goes through the
+// queue to worker.ts. Demo mode runs both in one process; scale mode
+// deploys them separately.
 import Fastify from "fastify"
 import cors from "@fastify/cors"
 import { serializerCompiler, validatorCompiler } from "@fastify/type-provider-zod"
