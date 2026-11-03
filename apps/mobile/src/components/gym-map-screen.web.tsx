@@ -2,11 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-// Only this file (and gym-map-screen.tsx's WebView bridge) touches Leaflet
-// directly - gym-panels.tsx has everything else (chat, reviews, edit/add-
-// gym forms) shared between both platforms. Leaflet is DOM-only, so this
-// file only renders on web; see gym-map-screen.tsx for native's WebView-
-// wrapped version of the same map.
+// Leaflet is DOM-only, so this file only renders on web - see
+// gym-map-screen.tsx for native's WebView-wrapped version.
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import type { LatLngBounds } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -35,14 +32,9 @@ import {
   panelStyles,
 } from '@/components/gym-panels';
 
-// Below this zoom, individual amenity filters stop making sense (you're
-// looking at aggregated counts, not individual gyms) and get hidden.
+// Below this zoom, amenity filters stop making sense and get hidden.
 const FILTERS_VISIBLE_AT_ZOOM = 11;
 
-// The one gym-map screen now, for any area - replaces the old fixed
-// /indonesia/bali route. Reached only via a Photon search result on the
-// home screen, which always supplies these params; there's no fixed
-// "launch city" list anymore (see docs/gym-data-design.md).
 function MapResize({ panelOpen }: { panelOpen: boolean }) {
   const map = useMap();
   useEffect(() => {
@@ -52,16 +44,8 @@ function MapResize({ panelOpen }: { panelOpen: boolean }) {
   return null;
 }
 
-// react-leaflet's MapContainer only reads its center/zoom props once, in
-// the ref callback that constructs the underlying Leaflet map on first
-// mount (confirmed in react-leaflet's own source: center/zoom are inside
-// `if (!mapInstanceRef.current)`, never read again after). If this screen
-// stays mounted across navigations - search a city, go back, hit "Near
-// me" - the route's params change but the map itself silently stays put,
-// since nothing ever calls setView for anything after the first render.
-// This is that missing call, keyed on the route's own center so it never
-// fights with the user's own panning (which doesn't change params.lat/lng
-// at all - see ViewportUrlSync's comment).
+// MapContainer only reads center/zoom once, on first mount - this is the
+// missing setView call for when the route's params change later.
 function MapViewSync({ center, zoom }: { center: [number, number]; zoom: number }) {
   const map = useMap();
   useEffect(() => {
@@ -71,9 +55,8 @@ function MapViewSync({ center, zoom }: { center: [number, number]; zoom: number 
   return null;
 }
 
-// "View on map" from the detail panel - a fresh object each press (even
-// re-pressing for the same gym) so this effect's dependency always
-// re-fires, not just on the first press for a given gym.
+// "View on map" from the detail panel - a fresh object each press so
+// this effect re-fires even for the same gym.
 function FlyToGym({ target }: { target: { lat: number; lng: number } | null }) {
   const map = useMap();
   useEffect(() => {
@@ -91,12 +74,8 @@ function MapClickHandler({ active, onPick }: { active: boolean; onPick: (lat: nu
   return null;
 }
 
-// Mirrors the live viewport into the URL (?lat=&lng=&zoom=), the same
-// pattern other map apps use so a pan/zoom is shareable and survives a
-// refresh. history.replaceState, not router.setParams - this should never
-// trigger a re-render/re-fetch of the screen itself, only update the
-// address bar. Web-only, same as the rest of this file (Leaflet is
-// DOM-only), so window is always defined here.
+// Mirrors the viewport into the URL so a pan/zoom survives a refresh.
+// history.replaceState, not router.setParams - never re-renders the screen.
 function ViewportUrlSync() {
   const map = useMap();
   const sync = () => {
@@ -111,14 +90,17 @@ function ViewportUrlSync() {
   return null;
 }
 
-// Supercluster point features carry just enough to look the real gym back
-// up afterward - the clustering math only needs coordinates, everything
-// else stays in the `gyms` array and gets joined back in by id.
+const ACCENT = '#146C5F';
+const TEXT = '#1C2430';
+const TEXT_DIM = '#6B7680';
+const BORDER = '#DDE2E6';
+const PLACEHOLDER_COLOR = '#9AA3AB';
+
+// Only coordinates go through the clustering math - the real gym is
+// joined back in by id afterward.
 type GymPoint = Supercluster.PointFeature<{ gymId: number }>;
 
-// So the "Find more gyms" button can animate its own opacity for the
-// unscanned-area nudge below - plain Pressable can't take an
-// Animated.Value in its style.
+// Plain Pressable can't take an Animated.Value in its style.
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 function gymsToPoints(gyms: Gym[]): GymPoint[] {
@@ -129,13 +111,9 @@ function gymsToPoints(gyms: Gym[]): GymPoint[] {
   }));
 }
 
-// Renders individual gym markers once zoomed in enough to be looking at a
-// specific city/neighborhood, and nothing at all once zoomed out past
-// that - changed from growing count-bubbles (per explicit request) to
-// just disappearing, rather than showing an aggregate at every zoom
-// level. Lives inside <MapContainer> so it can read the live viewport via
-// useMap/useMapEvents - the zoom cutoff is viewport-dependent, not
-// something that can be precomputed once.
+// Renders gym markers once zoomed in enough; nothing below that zoom,
+// rather than aggregate bubbles. Lives inside <MapContainer> to read the
+// live viewport via useMap/useMapEvents.
 function ClusterLayer({
   gyms,
   selectedGymId,
@@ -169,13 +147,8 @@ function ClusterLayer({
   });
 
   const index = useMemo(() => {
-    // maxZoom bumped from 16 to 20 - this is what makes the "no clusters
-    // above FILTERS_VISIBLE_AT_ZOOM" rule below actually produce fully
-    // individual points when forced, not just smaller ones. supercluster
-    // reuses its highest built zoom level's tree for any requested zoom
-    // at or above it, so a tree that only goes to 16 could still merge
-    // two gyms sitting right next to each other even when we ask for
-    // "basically unclustered."
+    // maxZoom 20, not supercluster's default 16 - a lower tree can still
+    // merge two nearby gyms even when queried at "basically unclustered."
     const sc = new Supercluster<{ gymId: number }>({ radius: 60, maxZoom: 20 });
     sc.load(gymsToPoints(gyms));
     return sc;
@@ -183,10 +156,7 @@ function ClusterLayer({
 
   const gymsById = useMemo(() => new Map(gyms.map((g) => [g.id, g])), [gyms]);
 
-  // Below the same zoom the filter chips use as their own cutoff, you're
-  // looking at a whole region/country - too far out for individual gym
-  // pins to mean anything, so nothing renders at all rather than growing
-  // into aggregate bubbles.
+  // Below this zoom, nothing renders rather than growing into bubbles.
   if (viewport.zoom < FILTERS_VISIBLE_AT_ZOOM) return null;
 
   const bbox: [number, number, number, number] = [
@@ -195,10 +165,8 @@ function ClusterLayer({
     viewport.bounds.getEast(),
     viewport.bounds.getNorth(),
   ];
-  // Always queried at supercluster's finest granularity now - there's no
-  // zoomed-out bubble view left to produce. maxZoom 20 on the index above
-  // still means this only ever merges two gyms sitting at (near-)
-  // identical coordinates, not ones that are merely close by.
+  // Always queried at the finest granularity - only merges (near-)
+  // identical coordinates, not gyms that are merely close by.
   const clusters = index.getClusters(bbox, 20);
 
   return (
@@ -208,15 +176,14 @@ function ClusterLayer({
         const { cluster, point_count: pointCount, cluster_id: clusterId, gymId } = feature.properties as any;
 
         if (cluster) {
-          // Rare fallback - two (near-)identical coordinates merged by
-          // supercluster, not the old "zoom out and watch it grow" bubble.
+          // Rare - two (near-)identical coordinates merged by supercluster.
           const radius = 14 + Math.min(18, Math.log(pointCount) * 6);
           return (
             <CircleMarker
               key={`cluster-${clusterId}`}
               center={[lat, lng]}
               radius={radius}
-              pathOptions={{ color: '#146C5F', fillColor: '#146C5F', fillOpacity: 0.75 }}
+              pathOptions={{ color: ACCENT, fillColor: ACCENT, fillOpacity: 0.75 }}
               eventHandlers={{
                 click: () => {
                   const expansionZoom = Math.min(index.getClusterExpansionZoom(clusterId), 18);
@@ -239,8 +206,8 @@ function ClusterLayer({
             center={[gym.lat, gym.lng]}
             radius={8}
             pathOptions={{
-              color: '#146C5F',
-              fillColor: gym.id === selectedGymId ? '#146C5F' : '#3FA393',
+              color: ACCENT,
+              fillColor: gym.id === selectedGymId ? ACCENT : '#3FA393',
               fillOpacity: 0.9,
             }}
             eventHandlers={{ click: () => onSelectGym(gym) }}
@@ -269,19 +236,13 @@ export default function MapScreen() {
   const router = useRouter();
   const { user, authHeaders } = useAuth();
 
-  // allGyms: every gym this session has loaded via the tiles endpoint,
-  // keyed by id and merged in as tiles resolve (API.md 2.2) - the map
-  // renders from this, not from any single tile's own response, so
-  // panning across tile boundaries just adds to what's already shown
-  // instead of replacing it.
+  // Every gym loaded this session, keyed by id and merged as tiles
+  // resolve - panning across tile boundaries adds to this, not replaces it.
   const [allGyms, setAllGyms] = useState<Gym[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedGym, setSelectedGym] = useState<Gym | null>(null);
-  // Tile-level Gym data (week/month pass, trial details, full
-  // description) only arrives once a specific gym's panel opens - the
-  // map's tile shape is deliberately lightweight. The panel renders
-  // progressively: selectedGym's own fields immediately, then upgrades
-  // once selectedGymDetails resolves.
+  // Full details only arrive once a gym's panel opens - renders
+  // progressively: selectedGym's fields first, then upgrades on resolve.
   const [selectedGymDetails, setSelectedGymDetails] = useState<GymDetails | null>(null);
   useEffect(() => {
     setSelectedGymDetails(null);
@@ -293,37 +254,25 @@ export default function MapScreen() {
       })
       .then(setSelectedGymDetails)
       .catch((e) => console.error('Failed to load gym details', e));
-    // Keyed on the id only, same reasoning as the suggestingEdit-reset
-    // effect below - re-fetch when the SELECTED GYM changes, not
-    // whenever the tile-level `selectedGym` object gets a new reference
-    // from a later mergeFreshGyms call.
+    // Keyed on id only - re-fetch on SELECTED GYM change, not every
+    // mergeFreshGyms reference change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedGym?.id]);
-  // "View on map" in the detail panel - re-centers/zooms without
-  // touching selectedGym, so the panel doesn't need to close on web
-  // (nothing's blocking the map here, unlike native).
+  // "View on map" re-centers/zooms without touching selectedGym - the
+  // panel doesn't need to close on web (unlike native).
   const [flyTo, setFlyTo] = useState<{ lat: number; lng: number } | null>(null);
   const [suggestingEdit, setSuggestingEdit] = useState(false);
-  // Resets whenever a different gym (or no gym) is selected, rather than
-  // threading a reset into every setSelectedGym call site - there are
-  // several (map click, price-list rows, chat update, close button) and
-  // all of them should drop back to the normal detail view.
+  // Resets on any selection change rather than threading a reset into
+  // every setSelectedGym call site.
   useEffect(() => setSuggestingEdit(false), [selectedGym?.id]);
   const [addingGym, setAddingGym] = useState(false);
   const [newGymLocation, setNewGymLocation] = useState<NewGymLocation | null>(null);
   const [dropInOnly, setDropInOnly] = useState(false);
   const [trialOnly, setTrialOnly] = useState(false);
-  // Live, substring, case-insensitive against name/description/address/
-  // categories (gymMatchesSearch in gym-panels.tsx) - filters the actual
-  // markers on screen (same filter chain as drop-in/trial/category
-  // below), not a separate search-results list, per explicit request
-  // that every keystroke should make gyms appear/disappear on the map
-  // itself.
+  // Filters markers directly on the map, not a separate results list.
   const [searchQuery, setSearchQuery] = useState('');
-  // Empty set = no filter applied (show every category) - same
-  // "unchecked means unfiltered" convention as dropInOnly/trialOnly,
-  // just extended to multiple simultaneous choices since a gym's
-  // category isn't a single yes/no the way drop-ins/trials are.
+  // Empty set = no filter applied, same "unchecked means unfiltered"
+  // convention as dropInOnly/trialOnly.
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const initialZoom = params.zoom ? parseFloat(params.zoom) : 12;
@@ -340,24 +289,16 @@ export default function MapScreen() {
     });
   };
 
-  // A counter, not a boolean - several tiles load in parallel, and a
-  // boolean would flicker false the instant any one of them resolves
-  // even with others still in flight.
+  // A counter, not a boolean - several tiles load in parallel.
   const [tilesLoadingCount, setTilesLoadingCount] = useState(0);
   const bumpTilesLoading = (delta: number) => setTilesLoadingCount((c) => Math.max(0, c + delta));
-  // Tiles already fetched this session, by geohash4 - avoids re-fetching
-  // the same tile on every minor pan jitter; "find more gyms" below
-  // clears the relevant entries so a fresh sweep's results actually show
-  // up on the next load rather than being skipped as "already have
-  // this."
+  // Tiles already fetched this session, by geohash4 - "find more gyms"
+  // clears the relevant entries so a fresh sweep's results aren't skipped.
   const fetchedTilesRef = useRef(new Set<string>());
   const [showScanNudge, setShowScanNudge] = useState(false);
-  // Mirrors allGyms for loadTiles's own closure below, which is called
-  // from a useEffect keyed on [mapBounds, zoom] only (deliberately not
-  // on every allGyms change, which would re-run this effect on every
-  // single merge) - a ref keeps that intentional omission from also
-  // meaning a stale read inside the one check that needs the latest
-  // value.
+  // Mirrors allGyms for loadTiles's closure, which only re-runs on
+  // [mapBounds, zoom] - a ref avoids a stale read without re-running on
+  // every merge.
   const allGymsRef = useRef<Gym[] | null>(null);
   allGymsRef.current = allGyms;
 
@@ -383,11 +324,7 @@ export default function MapScreen() {
           })
           .then((data) => {
             mergeFreshGyms(data.gyms);
-            // "No one has scanned this area for gyms yet" - a tile
-            // that's never been fetched at all (fetchedAt === null),
-            // not merely stale, is the same signal the old demo's
-            // separate /api/gyms/area-scanned check was for. No extra
-            // request needed now - it's already in this same response.
+            // fetchedAt === null means this tile's never been scanned.
             if (data.fetchedAt === null) setShowScanNudge(true);
             return true;
           })
@@ -410,18 +347,15 @@ export default function MapScreen() {
   const [findingMore, setFindingMore] = useState(false);
   const [findMoreMessage, setFindMoreMessage] = useState<string | null>(null);
 
-  // One POST /v1/sweeps per geohash5 cell covering the viewport (API.md
-  // 2.4's sweep scope cut - a single request only covers one cell), not
-  // the old demo's one-call-covers-the-whole-bbox /api/gyms/find-more.
-  // Each sweep is async (202 + poll), unlike the old synchronous scrape.
+  // One POST /v1/sweeps per geohash5 cell covering the viewport, each
+  // async (202 + poll).
   const findMoreGyms = async () => {
     if (!mapBounds || findingMore) return;
     if (!user) {
       setFindMoreMessage('Sign in to search for more gyms.');
       return;
     }
-    // Clicking IS the thing the nudge was asking for - dismiss
-    // immediately rather than waiting on the request to resolve.
+    // Clicking is what the nudge was asking for - dismiss immediately.
     setShowScanNudge(false);
     setFindingMore(true);
     setFindMoreMessage(null);
@@ -465,9 +399,8 @@ export default function MapScreen() {
     }
   };
 
-  // Blinking "Find more gyms" while the nudge is showing - looped
-  // opacity pulse, not a native-driver animation, since this same value
-  // also has to work on RN Web where the native driver doesn't exist.
+  // Blinking "Find more gyms" while the nudge is showing - no native
+  // driver, since this runs on RN Web where it doesn't exist.
   const nudgeBlink = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!showScanNudge) return;
@@ -481,12 +414,8 @@ export default function MapScreen() {
     return () => loop.stop();
   }, [showScanNudge, nudgeBlink]);
 
-  // Measured, not guessed - a percentage-based arrow position drifts off
-  // the real button on different screen sizes (confirmed live on native;
-  // fixed here too for the same reason). mapAreaRef is the same
-  // position:'relative' ancestor the overlay/arrow are positioned
-  // against, so measureLayout against it gives coordinates in that exact
-  // space, no extra conversion needed.
+  // Measured against mapAreaRef, not guessed as a percentage - a percent
+  // position drifted off the real button on a real device.
   const mapAreaRef = useRef<View>(null);
   const findMoreButtonRef = useRef<any>(null);
   const [findMoreButtonLayout, setFindMoreButtonLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(
@@ -516,8 +445,7 @@ export default function MapScreen() {
         (g.categories.length === 0 && selectedCategories.has(UNKNOWN_CATEGORY))
     );
 
-  // The drop-in price list is meant to reflect what's on screen, not every
-  // gym this session has loaded - restrict it to the current viewport.
+  // The drop-in price list reflects what's on screen, not every gym loaded.
   const inViewGyms = mapBounds ? visibleGyms.filter((g) => mapBounds.contains([g.lat, g.lng])) : visibleGyms;
 
   const confirmedPriceGyms = [...inViewGyms]
@@ -605,7 +533,7 @@ export default function MapScreen() {
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder="Search gyms on screen…"
-              placeholderTextColor="#9AA3AB"
+              placeholderTextColor={PLACEHOLDER_COLOR}
             />
             {searchQuery.length > 0 && (
               <Pressable style={styles.searchFilterClear} onPress={() => setSearchQuery('')}>
@@ -675,11 +603,8 @@ export default function MapScreen() {
                 const turningOn = !dropInOnly;
                 setDropInOnly(turningOn);
                 if (turningOn) {
-                  // showPriceList requires !selectedGym && !newGymLocation -
-                  // without clearing these, turning the filter on while a
-                  // gym's detail panel (or the add-gym flow) is open would
-                  // silently do nothing visible, since that panel keeps
-                  // occupying the same slot the price list wants.
+                  // showPriceList requires both cleared, or the panel
+                  // keeps occupying the slot the price list wants.
                   setSelectedGym(null);
                   setAddingGym(false);
                   setNewGymLocation(null);
@@ -764,7 +689,7 @@ export default function MapScreen() {
 
         {allGyms === null && !error && (
           <View style={styles.overlay}>
-            <ActivityIndicator size="large" color="#146C5F" />
+            <ActivityIndicator size="large" color={ACCENT} />
             <Text style={styles.overlayTitle}>Finding gyms in {params.name}…</Text>
             <Text style={styles.overlaySubtitle}>
               First look at a new area can take up to 30 seconds while it pulls from OpenStreetMap.
@@ -849,7 +774,7 @@ export default function MapScreen() {
             {selectedGymDetails ? (
               <TrialSection key={`trial-${selectedGymDetails.id}`} gym={selectedGymDetails} />
             ) : (
-              <ActivityIndicator size="small" color="#146C5F" />
+              <ActivityIndicator size="small" color={ACCENT} />
             )}
             {(() => {
               const dayPass = selectedGymDetails?.prices.find((p) => p.kind === 'day_pass') ?? selectedGym.dayPass;
@@ -963,7 +888,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  backButtonText: { fontSize: 13, fontWeight: '600', color: '#1C2430' },
+  backButtonText: { fontSize: 13, fontWeight: '600', color: TEXT },
   searchFilterWrap: {
     position: 'absolute',
     top: 56,
@@ -979,7 +904,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
     fontSize: 13,
-    color: '#1C2430',
+    color: TEXT,
     boxShadow: '0 1px 4px rgba(0,0,0,0.2)' as unknown as undefined,
   },
   searchFilterClear: {
@@ -988,17 +913,13 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  searchFilterClearText: { fontSize: 13, color: '#6B7680' },
+  searchFilterClearText: { fontSize: 13, color: TEXT_DIM },
   categoryFilterWrap: {
     position: 'absolute',
     top: 96,
     left: 16,
-    // Higher than dropInFilter/trialFilter's 1000 - the open dropdown's
-    // row list extends down far enough to visually overlap those two
-    // buttons underneath it, and with equal z-index the later-in-DOM
-    // buttons win hit-testing over the dropdown despite being drawn
-    // underneath - caught live via a click on a category row landing on
-    // "Accepts drop-ins" instead.
+    // Higher than dropInFilter/trialFilter's 1000, or their later-in-DOM
+    // buttons win hit-testing over the open dropdown that overlaps them.
     zIndex: 1100,
   },
   categoryFilterButton: {
@@ -1013,7 +934,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  categoryFilterChevron: { fontSize: 11, color: '#6B7680' },
+  categoryFilterChevron: { fontSize: 11, color: TEXT_DIM },
   categoryDropdown: {
     position: 'absolute',
     top: '100%',
@@ -1037,7 +958,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  categoryDropdownRowText: { fontSize: 13, color: '#1C2430', flex: 1 },
+  categoryDropdownRowText: { fontSize: 13, color: TEXT, flex: 1 },
   dropInFilter: {
     position: 'absolute',
     top: 136,
@@ -1054,7 +975,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  dropInFilterText: { fontSize: 13, color: '#1C2430', fontWeight: '600' },
+  dropInFilterText: { fontSize: 13, color: TEXT, fontWeight: '600' },
   trialFilter: {
     position: 'absolute',
     top: 176,
@@ -1081,14 +1002,14 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  priceRowName: { fontSize: 14, color: '#1C2430', flex: 1, paddingRight: 8 },
-  priceRowPrice: { fontSize: 14, fontWeight: '700', color: '#146C5F' },
+  priceRowName: { fontSize: 14, color: TEXT, flex: 1, paddingRight: 8 },
+  priceRowPrice: { fontSize: 14, fontWeight: '700', color: ACCENT },
   priceRowPriceSuggested: { fontSize: 14, fontWeight: '700', color: '#B8860B' },
   priceDivider: {
     paddingTop: 14,
     marginTop: 4,
     borderTopWidth: 1,
-    borderTopColor: '#DDE2E6',
+    borderTopColor: BORDER,
   },
   priceDividerText: {
     fontSize: 11,
@@ -1106,7 +1027,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   addGymButton: {
-    backgroundColor: '#146C5F',
+    backgroundColor: ACCENT,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
@@ -1115,7 +1036,7 @@ const styles = StyleSheet.create({
     cursor: 'pointer',
   },
   findMoreButton: {
-    backgroundColor: '#1C2430',
+    backgroundColor: TEXT,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 8,
@@ -1124,9 +1045,7 @@ const styles = StyleSheet.create({
     cursor: 'pointer',
   },
   addGymButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
-  // Bottom-left, deliberately quiet - this can fire a lot while panning
-  // around, so it's a small ambient note, not an attention-grabbing one
-  // like the scan nudge above.
+  // Small ambient note, not attention-grabbing - fires a lot while panning.
   osmLoadingNote: {
     position: 'absolute',
     bottom: 16,
@@ -1150,12 +1069,9 @@ const styles = StyleSheet.create({
     boxShadow: '0 1px 4px rgba(0,0,0,0.2)' as unknown as undefined,
     zIndex: 999,
   },
-  findMoreMessageText: { fontSize: 12, color: '#1C2430' },
-  // zIndex sits below topRightButtons (1000) on purpose - the button
-  // itself needs to pop out brighter against this dimmed backdrop, not
-  // get dimmed along with everything else. A real Pressable (not a
-  // decorative View) so clicking anywhere on the map also dismisses the
-  // nudge, not just clicking the button itself.
+  findMoreMessageText: { fontSize: 12, color: TEXT },
+  // zIndex below topRightButtons so the button pops against this dim.
+  // A real Pressable so clicking the map also dismisses the nudge.
   scanNudgeOverlay: {
     position: 'absolute',
     top: 0,
@@ -1178,10 +1094,8 @@ const styles = StyleSheet.create({
     boxShadow: '0 4px 16px rgba(0,0,0,0.3)' as unknown as undefined,
     zIndex: 960,
   },
-  scanNudgeMessageText: { fontSize: 14, color: '#1C2430', textAlign: 'center', lineHeight: 20 },
-  // top/left are set inline, measured from the real "Find more gyms"
-  // button (findMoreButtonLayout) rather than guessed as a percentage -
-  // a percentage drifted off the actual button on a real device.
+  scanNudgeMessageText: { fontSize: 14, color: TEXT, textAlign: 'center', lineHeight: 20 },
+  // top/left set inline from the measured findMoreButtonLayout.
   scanNudgeArrow: {
     position: 'absolute',
     fontSize: 40,
@@ -1195,7 +1109,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 16,
     right: 16,
-    backgroundColor: '#1C2430',
+    backgroundColor: TEXT,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
@@ -1206,7 +1120,7 @@ const styles = StyleSheet.create({
   },
   placingHintText: { color: 'white', fontSize: 13 },
   // @ts-expect-error - web-only cursor hint, fine for the demo
-  placingHintCancel: { color: '#9AA3AB', fontSize: 13, fontWeight: '600', cursor: 'pointer' },
+  placingHintCancel: { color: PLACEHOLDER_COLOR, fontSize: 13, fontWeight: '600', cursor: 'pointer' },
   overlay: {
     position: 'absolute',
     top: 0,
@@ -1220,10 +1134,10 @@ const styles = StyleSheet.create({
     zIndex: 1500,
     paddingHorizontal: 40,
   },
-  overlayTitle: { fontSize: 16, fontWeight: '700', color: '#1C2430', textAlign: 'center' },
+  overlayTitle: { fontSize: 16, fontWeight: '700', color: TEXT, textAlign: 'center' },
   overlaySubtitle: { fontSize: 13, color: '#7A6F63', textAlign: 'center' },
   retryButton: {
-    backgroundColor: '#146C5F',
+    backgroundColor: ACCENT,
     borderRadius: 8,
     paddingHorizontal: 20,
     paddingVertical: 10,
@@ -1246,88 +1160,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
   },
-  panelTitle: { fontSize: 18, fontWeight: '700', color: '#1C2430', flex: 1, paddingRight: 8 },
+  panelTitle: { fontSize: 18, fontWeight: '700', color: TEXT, flex: 1, paddingRight: 8 },
   panelHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  suggestEditLink: { fontSize: 12, fontWeight: '600', color: '#146C5F' },
+  suggestEditLink: { fontSize: 12, fontWeight: '600', color: ACCENT },
   // @ts-expect-error - web-only cursor hint, fine for the demo
   panelCloseHit: { cursor: 'pointer', padding: 8 },
-  panelClose: { fontSize: 16, color: '#6B7680' },
-  editFieldPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  editFieldChip: { borderWidth: 1, borderColor: '#DDE2E6', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
-  editFieldChipActive: { backgroundColor: '#146C5F', borderColor: '#146C5F' },
-  editFieldChipText: { fontSize: 12, color: '#5B6470', fontWeight: '600' },
-  editFieldChipTextActive: { color: 'white' },
-  panelScroll: { flex: 1 },
-  panelScrollContent: { padding: 20, gap: 20 },
-  panelRow: { gap: 8 },
-  panelLabel: { fontSize: 11, fontWeight: '600', color: '#8A94A0', textTransform: 'uppercase', letterSpacing: 0.5 },
-  panelValue: { fontSize: 14, color: '#1C2430', lineHeight: 20 },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    // @ts-expect-error - web-only cursor hint, fine for the demo
-    cursor: 'pointer',
-  },
-  sectionChevron: { fontSize: 12, color: '#8A94A0' },
-  sectionHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  reviewForm: {
-    gap: 8,
-    backgroundColor: '#F7F8F9',
-    borderRadius: 10,
-    padding: 12,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#DDE2E6',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 13,
-    backgroundColor: 'white',
-  },
-  textarea: { minHeight: 60, textAlignVertical: 'top' },
-  ratingPicker: { flexDirection: 'row', gap: 2 },
-  // @ts-expect-error - web-only cursor hint, fine for the demo
-  starHit: { cursor: 'pointer', padding: 2 },
-  star: { fontSize: 18, color: '#D7DBDF' },
-  starFilled: { color: '#E0A500' },
-  submitButton: {
-    backgroundColor: '#146C5F',
-    borderRadius: 8,
-    paddingVertical: 9,
-    alignItems: 'center',
-  },
-  submitButtonDisabled: { opacity: 0.6 },
-  submitButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
-  reviewCard: {
-    gap: 4,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#EFEFEF',
-  },
-  reviewCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  reviewAuthor: { fontSize: 13, fontWeight: '700', color: '#1C2430' },
-  reviewStars: { fontSize: 12, color: '#E0A500' },
-  chatBox: { gap: 8 },
-  chatBubble: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' },
-  chatBubbleUser: { backgroundColor: '#146C5F', alignSelf: 'flex-end' },
-  chatBubbleAssistant: { backgroundColor: '#F7F8F9', alignSelf: 'flex-start' },
-  chatBubbleUserText: { color: 'white', fontSize: 13, lineHeight: 18 },
-  chatBubbleAssistantText: { color: '#1C2430', fontSize: 13, lineHeight: 18 },
-  chatInputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
-  chatInput: { flex: 1 },
-  chatInputLarge: { minHeight: 72, textAlignVertical: 'top' },
-  chatSendButton: { paddingHorizontal: 16 },
+  panelClose: { fontSize: 16, color: TEXT_DIM },
   checkbox: {
     width: 18,
     height: 18,
     borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#DDE2E6',
+    borderColor: BORDER,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxChecked: { backgroundColor: '#146C5F', borderColor: '#146C5F' },
+  checkboxChecked: { backgroundColor: ACCENT, borderColor: ACCENT },
   checkboxMark: { color: 'white', fontSize: 12, fontWeight: '700' },
 });
