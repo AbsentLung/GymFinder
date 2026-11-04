@@ -90,12 +90,15 @@ export default function AuthScreen() {
 
 const ACCENT = '#CEFF45';
 const BG = '#111315';
+const TEXT = '#F4F4F2';
+const TEXT_MUTED = '#A9ADB3';
+const FONT_SIZE_BODY = 13;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: { width: '100%', maxWidth: 380, gap: 14 },
-  title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 28, color: '#F4F4F2' },
-  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: '#A9ADB3', marginBottom: 6 },
+  title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 28, color: TEXT },
+  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: FONT_SIZE_BODY, color: TEXT_MUTED, marginBottom: 6 },
   field: { gap: 6 },
   label: {
     fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
@@ -108,15 +111,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2C3034',
     backgroundColor: '#1B1E21',
-    color: '#F4F4F2',
+    color: TEXT,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
   },
-  error: { color: '#E9643A', fontSize: 13 },
+  error: { color: '#E9643A', fontSize: FONT_SIZE_BODY },
   submitButton: { backgroundColor: ACCENT, borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginTop: 4 },
   submitButtonDisabled: { opacity: 0.6 },
-  submitButtonText: { color: '#111315', fontWeight: '700', fontSize: 14 },
-  toggle: { color: '#A9ADB3', fontSize: 13, textAlign: 'center', marginTop: 4 },
+  submitButtonText: { color: BG, fontWeight: '700', fontSize: 14 },
+  toggle: { color: TEXT_MUTED, fontSize: FONT_SIZE_BODY, textAlign: 'center', marginTop: 4 },
 });
