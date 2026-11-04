@@ -1,7 +1,5 @@
-// The "find more gyms" scrape - scrapes the generic "gym" search
-// results list for a viewport (not verifying one specific submitted
-// gym - that's llm/tools.ts's find_website_on_google_maps). Bounded to
-// whatever's visible on first load, no scrolling.
+// "Find more gyms" - the generic "gym" search for a viewport, not the
+// single-gym lookup in llm/tools.ts. Bounded to the first-load results.
 import { chromium } from "playwright"
 import { extractLatLngFromMapsHref, bboxToGoogleMapsZoom } from "../lib.js"
 import type { SourceInterface, RawGym } from "../interfaces/source.js"
