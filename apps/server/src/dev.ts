@@ -1,7 +1,6 @@
-// Demo mode's combined API+worker process. Needed for real, not just an
-// optimization: the in-memory cache is per-process, and chat writes its
-// answer from the worker side while the API reads it back - that only
-// works if both are the same process.
+// Demo mode's combined API+worker process - required, not optional:
+// the in-memory cache is per-process, and chat writes/reads need to
+// share one.
 import { config, MODE } from "./config.js"
 import { queue } from "./queue/index.js"
 import { buildApp } from "./api.js"

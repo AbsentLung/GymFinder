@@ -1,10 +1,6 @@
-// Two separate LLM turns, not one - combining "find and record" with
-// "answer the question" let the model state a found price in the reply
-// without ever calling the tool to record it.
-//
-// A fact found in phase 1 isn't live by the time phase 2 answers - it
-// goes through the normal bot-review pipeline first. Phase 2 can still
-// mention it, just labeled as unverified research.
+// Two separate LLM turns - combining "find and record" with "answer"
+// let the model state a found price without calling the tool. A found
+// fact goes through bot-review first, so it's mentioned as unverified.
 import { sql, eq, desc } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymPrices, reviews } from "../db/schema.js"
