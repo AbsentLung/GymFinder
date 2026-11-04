@@ -240,7 +240,7 @@ export default function MapScreen() {
     zoom?: string;
   }>();
   const router = useRouter();
-  const { user, authHeaders } = useAuth();
+  const { authHeaders } = useAuth();
 
   // Every gym loaded this session, keyed by id and merged as tiles
   // resolve - panning across tile boundaries adds to this, not replaces it.
@@ -360,38 +360,24 @@ export default function MapScreen() {
   // async (202 + poll).
   const findMoreGyms = async () => {
     if (!mapBounds || findingMore) return;
-    if (!user) {
-      setFindMoreMessage('Sign in to search for more gyms.');
-      return;
-    }
     // Clicking is what the nudge was asking for - dismiss immediately.
     setShowScanNudge(false);
     setFindingMore(true);
     setFindMoreMessage(null);
     try {
-      const cells = geohash5TilesCoveringBbox({
-        minLat: mapBounds.getSouth(),
-        maxLat: mapBounds.getNorth(),
-        minLng: mapBounds.getWest(),
-        maxLng: mapBounds.getEast(),
+      const bbox = { minLat: mapBounds.getSouth(), maxLat: mapBounds.getNorth(), minLng: mapBounds.getWest(), maxLng: mapBounds.getEast() };
+      // One bbox call, not one per cell - the server fans out and caps it.
+      const res = await fetch(`${API_BASE_URL}/v1/sweeps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ bbox }),
       });
+      if (!res.ok) throw new Error(`Sweep failed: ${res.status}`);
+      const { items } = await res.json();
       const settled = await Promise.all(
-        cells.map(async (geohash) =>
-          fetch(`${API_BASE_URL}/v1/sweeps`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-            credentials: 'include',
-            body: JSON.stringify({ geohash }),
-          })
-            .then((r) => {
-              if (!r.ok) throw new Error(`Sweep failed: ${r.status}`);
-              return r.json();
-            })
-            .then((created: GymRequest) => pollRequest(created.id, authHeaders))
-            .catch((e) => {
-              console.error('Sweep failed for a cell', e);
-              return null;
-            })
+        items.map((item: { id: string | null; status: string }) =>
+          item.id && item.status === 'pending' ? pollRequest(item.id, authHeaders).catch(() => null) : Promise.resolve(item)
         )
       );
       const completed = settled.filter((r): r is GymRequest => r != null);
@@ -400,7 +386,7 @@ export default function MapScreen() {
         setFindMoreMessage('Something went wrong - try again?');
       } else {
         setFindMoreMessage(totalNew > 0 ? `Found ${totalNew} new gym(s).` : 'No new gyms found here.');
-        cells.forEach((cell) => fetchedTilesRef.current.delete(cell.slice(0, 4)));
+        geohash5TilesCoveringBbox(bbox).forEach((cell) => fetchedTilesRef.current.delete(cell.slice(0, 4)));
         loadTiles({ suppressNudge: true });
       }
     } finally {

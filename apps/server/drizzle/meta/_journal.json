@@ -50,6 +50,13 @@
       "when": 1793733490739,
       "tag": "0006_fearless_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793758096710,
+      "tag": "0007_vengeful_spyke",
+      "breakpoints": true
     }
   ]
 }
