@@ -319,16 +319,22 @@ const TEXT_DIM = '#777D84';
 const ERROR = '#E9643A';
 const BORDER = '#2C3034';
 const PLACEHOLDER_COLOR = '#6C7177';
+const FONT_SIZE_TINY = 11;
+const FONT_SIZE_SMALL = 12;
+const FONT_SIZE_BODY = 13;
+const FONT_SIZE_LARGE = 14;
+const FONT_WEIGHT_SEMIBOLD = '600';
+const FONT_WEIGHT_BOLD = '700';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, padding: 24, gap: 14, alignItems: 'center' },
   title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 26, color: TEXT, width: '100%', maxWidth: 640 },
-  sectionTitle: { color: TEXT, fontSize: 16, fontWeight: '700', width: '100%', maxWidth: 640, marginTop: 6 },
-  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: TEXT_MUTED },
+  sectionTitle: { color: TEXT, fontSize: 16, fontWeight: FONT_WEIGHT_BOLD, width: '100%', maxWidth: 640, marginTop: 6 },
+  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: FONT_SIZE_BODY, color: TEXT_MUTED },
   submitButton: { backgroundColor: ACCENT, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 20 },
-  submitButtonText: { color: BG, fontWeight: '700', fontSize: 14 },
+  submitButtonText: { color: BG, fontWeight: FONT_WEIGHT_BOLD, fontSize: FONT_SIZE_LARGE },
   promoteRow: { width: '100%', maxWidth: 640, gap: 8, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14 },
-  promoteLabel: { color: TEXT_MUTED, fontSize: 12 },
+  promoteLabel: { color: TEXT_MUTED, fontSize: FONT_SIZE_SMALL },
   promoteInputRow: { flexDirection: 'row', gap: 8 },
   promoteInput: {
     flex: 1,
@@ -339,41 +345,41 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    fontSize: 14,
+    fontSize: FONT_SIZE_LARGE,
   },
   promoteButton: { backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center' },
-  promoteButtonText: { color: BG, fontWeight: '700', fontSize: 13 },
+  promoteButtonText: { color: BG, fontWeight: FONT_WEIGHT_BOLD, fontSize: FONT_SIZE_BODY },
   filterRow: { flexDirection: 'row', gap: 8, width: '100%', maxWidth: 640, flexWrap: 'wrap' },
   chip: { borderWidth: 1, borderColor: BORDER, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
   chipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
-  chipText: { color: TEXT_MUTED, fontSize: 12, fontWeight: '600' },
+  chipText: { color: TEXT_MUTED, fontSize: FONT_SIZE_SMALL, fontWeight: FONT_WEIGHT_SEMIBOLD },
   chipTextActive: { color: BG },
-  error: { color: ERROR, fontSize: 13 },
+  error: { color: ERROR, fontSize: FONT_SIZE_BODY },
   list: { width: '100%', maxWidth: 640, flex: 1 },
   listContent: { gap: 12, paddingBottom: 24 },
   row: { borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14, gap: 6, backgroundColor: '#1B1E21' },
   rowHeader: { flexDirection: 'row', justifyContent: 'space-between' },
   rowType: {
     fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
-    fontSize: 11,
+    fontSize: FONT_SIZE_TINY,
     color: ACCENT,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  rowStatus: { fontSize: 11, color: TEXT_DIM, fontWeight: '600' },
-  rowSummary: { color: TEXT, fontSize: 14, fontWeight: '600' },
-  rowCurrent: { color: TEXT_MUTED, fontSize: 12 },
-  rowDescription: { color: TEXT_MUTED, fontSize: 13, fontStyle: 'italic' },
-  rowMeta: { color: PLACEHOLDER_COLOR, fontSize: 11 },
+  rowStatus: { fontSize: FONT_SIZE_TINY, color: TEXT_DIM, fontWeight: FONT_WEIGHT_SEMIBOLD },
+  rowSummary: { color: TEXT, fontSize: FONT_SIZE_LARGE, fontWeight: FONT_WEIGHT_SEMIBOLD },
+  rowCurrent: { color: TEXT_MUTED, fontSize: FONT_SIZE_SMALL },
+  rowDescription: { color: TEXT_MUTED, fontSize: FONT_SIZE_BODY, fontStyle: 'italic' },
+  rowMeta: { color: PLACEHOLDER_COLOR, fontSize: FONT_SIZE_TINY },
   actions: { flexDirection: 'row', gap: 8, marginTop: 6 },
   actionButton: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
   actionButtonDisabled: { opacity: 0.4 },
   approveButton: { backgroundColor: ACCENT },
-  approveButtonText: { color: BG, fontWeight: '700', fontSize: 13 },
+  approveButtonText: { color: BG, fontWeight: FONT_WEIGHT_BOLD, fontSize: FONT_SIZE_BODY },
   denyButton: { borderWidth: 1, borderColor: ERROR },
-  denyButtonText: { color: ERROR, fontWeight: '700', fontSize: 13 },
+  denyButtonText: { color: ERROR, fontWeight: FONT_WEIGHT_BOLD, fontSize: FONT_SIZE_BODY },
   cancelButton: { paddingVertical: 8, paddingHorizontal: 12 },
-  cancelButtonText: { color: TEXT_DIM, fontSize: 13 },
+  cancelButtonText: { color: TEXT_DIM, fontSize: FONT_SIZE_BODY },
   rejectForm: { gap: 8, marginTop: 6 },
   rejectInput: {
     borderWidth: 1,
@@ -383,9 +389,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    fontSize: 13,
+    fontSize: FONT_SIZE_BODY,
     minHeight: 50,
   },
   loadMoreButton: { alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 20 },
-  loadMoreButtonText: { color: ACCENT, fontSize: 13, fontWeight: '600' },
+  loadMoreButtonText: { color: ACCENT, fontSize: FONT_SIZE_BODY, fontWeight: FONT_WEIGHT_SEMIBOLD },
 });
