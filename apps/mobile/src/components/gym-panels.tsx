@@ -144,10 +144,8 @@ export function formatPrice(price: { amountMinor: number; currency: string; usdC
   return `${symbol}${amountMajor.toFixed(decimals)}`;
 }
 
-// Derived: a day-pass (or any loaded) price implies drop-ins are
-// accepted. acceptsDropIn is an explicit override; most gyms are NULL,
-// meaning "use this derived guess." No price means "not known," never
-// "no."
+// Derived: a day-pass price implies drop-ins are accepted. No price
+// means "not known," never "no."
 export function acceptsDropIn(gym: { acceptsDropIn: boolean | null; dayPass: DayPass | null; prices?: PriceEntry[] }): boolean {
   if (gym.acceptsDropIn != null) return gym.acceptsDropIn;
   if (gym.dayPass != null) return true;
@@ -320,10 +318,8 @@ const chatHistoryCache = new Map<number, ChatMessage[]>();
 const CHAT_POLL_MS = 1000;
 const CHAT_POLL_TIMEOUT_MS = 30000;
 
-// Async (202 + poll GET /v1/chats/{chatId}). A fact the bot finds along
-// the way doesn't update this gym live - it becomes a gym_changes row
-// through the normal bot-review/admin pipeline (FR-9). Expanded by
-// default, unlike Trial/Reviews above.
+// Async (202 + poll). A found fact becomes a gym_changes row through
+// the normal pipeline (FR-9), not a live update.
 export function ChatSection({ gym }: { gym: Pick<Gym, 'id'> }) {
   const [expanded, setExpanded] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>(() => chatHistoryCache.get(gym.id) ?? []);
@@ -512,10 +508,8 @@ export function SubmitGymForm({
   );
 }
 
-// Mirrors apps/server/src/jobs/bot-review.ts's NON_PRICE_FIELDS plus the
-// three price kinds. "name"/"status" aren't offered (no new UI surface);
-// trial DETAILS text isn't either - only the hasTrial boolean is in the
-// server's field whitelist.
+// Mirrors bot-review.ts's NON_PRICE_FIELDS plus the three price kinds.
+// Trial details text isn't offered - only hasTrial is in the whitelist.
 export const EDITABLE_FIELDS: { key: string; label: string; kind: 'price' | 'text' | 'category' | 'boolean' }[] = [
   { key: 'day_pass', label: 'Day pass price (USD)', kind: 'price' },
   { key: 'week_pass', label: 'Week pass price (USD)', kind: 'price' },
