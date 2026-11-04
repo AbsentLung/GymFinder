@@ -1,8 +1,5 @@
 // Client-side mirror of apps/server/src/lib.ts's geohash functions - no
-// shared package wired up yet, so duplicated rather than standing up
-// that plumbing for one small, pure algorithm. Confirmed against real
-// PostGIS output server-side (ST_GeoHash match); this is the same
-// algorithm, just stopped one character earlier for precision 4.
+// shared package wired up yet, so duplicated.
 const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 
 export interface Bbox {
@@ -79,11 +76,8 @@ function decodeGeohashBounds(geohash: string): Bbox {
   return { minLat, maxLat, minLng, maxLng };
 }
 
-// Grid-walks at HALF a tile's own span so a thin edge sliver is never
-// skipped; oversampling is harmless (the Set dedupes). Samples up to
-// (not including) the max edge, then adds it explicitly - a `<=` loop
-// condition instead would usually stop short of the edge and skip the
-// whole top row except its one corner (same bug server-side lib.ts had).
+// Grid-walks at half a tile's span so no edge sliver is skipped;
+// oversampling is harmless (the Set dedupes).
 function tilesCoveringBbox(bbox: Bbox, precision: number): string[] {
   const sample = decodeGeohashBounds(encodeGeohash(bbox.minLat, bbox.minLng, precision));
   const latStep = (sample.maxLat - sample.minLat) / 2;
