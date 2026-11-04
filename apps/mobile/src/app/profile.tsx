@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
   subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: '#A9ADB3' },
   adminBadge: {
     alignSelf: 'flex-start',
-    color: '#111315',
+    color: BG,
     backgroundColor: ACCENT,
     fontSize: 11,
     fontWeight: '700',
@@ -63,7 +63,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   submitButton: { backgroundColor: ACCENT, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
-  submitButtonText: { color: '#111315', fontWeight: '700', fontSize: 14 },
+  submitButtonText: { color: BG, fontWeight: '700', fontSize: 14 },
   linkButton: { marginTop: 8 },
   linkButtonText: { color: ACCENT, fontSize: 14, fontWeight: '600' },
   signOutButton: { marginTop: 16, alignItems: 'center' },
