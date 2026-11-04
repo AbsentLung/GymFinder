@@ -65,6 +65,12 @@ const TEXT = '#1C2430';
 const TEXT_DIM = '#6B7680';
 const BORDER = '#DDE2E6';
 const PLACEHOLDER_COLOR = '#9AA3AB';
+const FONT_SIZE_TINY = 11;
+const FONT_SIZE_SMALL = 12;
+const FONT_SIZE_BODY = 13;
+const FONT_SIZE_LARGE = 14;
+const FONT_WEIGHT_SEMIBOLD = '600';
+const FONT_WEIGHT_BOLD = '700';
 
 type GymPoint = Supercluster.PointFeature<{ gymId: number }>;
 
@@ -814,7 +820,7 @@ const styles = StyleSheet.create({
     ...shadow(3),
     zIndex: 1000,
   },
-  backButtonText: { fontSize: 13, fontWeight: '600', color: TEXT },
+  backButtonText: { fontSize: FONT_SIZE_BODY, fontWeight: FONT_WEIGHT_SEMIBOLD, color: TEXT },
   searchFilterWrap: { position: 'absolute', top: 56, left: 16, zIndex: 1000, flexDirection: 'row', alignItems: 'center' },
   searchFilterInput: {
     width: 180,
@@ -822,12 +828,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
-    fontSize: 13,
+    fontSize: FONT_SIZE_BODY,
     color: TEXT,
     ...shadow(3),
   },
   searchFilterClear: { position: 'absolute', right: 10 },
-  searchFilterClearText: { fontSize: 13, color: TEXT_DIM },
+  searchFilterClearText: { fontSize: FONT_SIZE_BODY, color: TEXT_DIM },
   categoryFilterWrap: { position: 'absolute', top: 96, left: 16, zIndex: 1100 },
   categoryFilterButton: {
     backgroundColor: 'white',
@@ -839,7 +845,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  categoryFilterChevron: { fontSize: 11, color: TEXT_DIM },
+  categoryFilterChevron: { fontSize: FONT_SIZE_TINY, color: TEXT_DIM },
   categoryDropdown: {
     position: 'absolute',
     top: '100%',
@@ -854,7 +860,7 @@ const styles = StyleSheet.create({
     ...shadow(4),
   },
   categoryDropdownRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  categoryDropdownRowText: { fontSize: 13, color: TEXT, flex: 1 },
+  categoryDropdownRowText: { fontSize: FONT_SIZE_BODY, color: TEXT, flex: 1 },
   dropInFilter: {
     position: 'absolute',
     top: 136,
@@ -869,7 +875,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  dropInFilterText: { fontSize: 13, color: TEXT, fontWeight: '600' },
+  dropInFilterText: { fontSize: FONT_SIZE_BODY, color: TEXT, fontWeight: FONT_WEIGHT_SEMIBOLD },
   trialFilter: {
     position: 'absolute',
     top: 176,
@@ -885,17 +891,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#EFEFEF' },
-  priceRowName: { fontSize: 14, color: TEXT, flex: 1, paddingRight: 8 },
-  priceRowPrice: { fontSize: 14, fontWeight: '700', color: ACCENT },
-  priceRowPriceSuggested: { fontSize: 14, fontWeight: '700', color: '#B8860B' },
+  priceRowName: { fontSize: FONT_SIZE_LARGE, color: TEXT, flex: 1, paddingRight: 8 },
+  priceRowPrice: { fontSize: FONT_SIZE_LARGE, fontWeight: FONT_WEIGHT_BOLD, color: ACCENT },
+  priceRowPriceSuggested: { fontSize: FONT_SIZE_LARGE, fontWeight: FONT_WEIGHT_BOLD, color: '#B8860B' },
   priceDivider: { paddingTop: 14, marginTop: 4, borderTopWidth: 1, borderTopColor: BORDER },
-  priceDividerText: { fontSize: 11, fontWeight: '600', color: '#8A94A0', textTransform: 'uppercase', letterSpacing: 0.5 },
+  priceDividerText: { fontSize: FONT_SIZE_TINY, fontWeight: FONT_WEIGHT_SEMIBOLD, color: '#8A94A0', textTransform: 'uppercase', letterSpacing: 0.5 },
   topRightButtons: { position: 'absolute', top: 16, right: 16, zIndex: 1000, flexDirection: 'row', gap: 8 },
   addGymButton: { backgroundColor: ACCENT, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, ...shadow(3) },
   findMoreButton: { backgroundColor: TEXT, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, ...shadow(3) },
-  addGymButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
+  addGymButtonText: { color: 'white', fontWeight: FONT_WEIGHT_SEMIBOLD, fontSize: FONT_SIZE_BODY },
   findMoreMessage: { position: 'absolute', top: 56, right: 16, maxWidth: 220, backgroundColor: 'white', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, ...shadow(3), zIndex: 999 },
-  findMoreMessageText: { fontSize: 12, color: TEXT },
+  findMoreMessageText: { fontSize: FONT_SIZE_SMALL, color: TEXT },
   // Small ambient note, not attention-grabbing - fires a lot while panning.
   osmLoadingNote: {
     position: 'absolute',
@@ -907,7 +913,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     zIndex: 900,
   },
-  osmLoadingNoteText: { color: 'white', fontSize: 11 },
+  osmLoadingNoteText: { color: 'white', fontSize: FONT_SIZE_TINY },
   // zIndex below topRightButtons so the button pops against this dim.
   // A real Pressable so tapping the map also dismisses the nudge.
   scanNudgeOverlay: {
@@ -932,7 +938,7 @@ const styles = StyleSheet.create({
     ...shadow(6),
     zIndex: 960,
   },
-  scanNudgeMessageText: { fontSize: 14, color: TEXT, textAlign: 'center', lineHeight: 20 },
+  scanNudgeMessageText: { fontSize: FONT_SIZE_LARGE, color: TEXT, textAlign: 'center', lineHeight: 20 },
   // top/left set inline from the measured findMoreButtonLayout.
   scanNudgeArrow: {
     position: 'absolute',
@@ -953,8 +959,8 @@ const styles = StyleSheet.create({
     gap: 10,
     zIndex: 1000,
   },
-  placingHintText: { color: 'white', fontSize: 13 },
-  placingHintCancel: { color: PLACEHOLDER_COLOR, fontSize: 13, fontWeight: '600' },
+  placingHintText: { color: 'white', fontSize: FONT_SIZE_BODY },
+  placingHintCancel: { color: PLACEHOLDER_COLOR, fontSize: FONT_SIZE_BODY, fontWeight: FONT_WEIGHT_SEMIBOLD },
   overlay: {
     position: 'absolute',
     top: 0,
@@ -968,10 +974,10 @@ const styles = StyleSheet.create({
     zIndex: 1500,
     paddingHorizontal: 40,
   },
-  overlayTitle: { fontSize: 16, fontWeight: '700', color: TEXT, textAlign: 'center' },
-  overlaySubtitle: { fontSize: 13, color: '#7A6F63', textAlign: 'center' },
+  overlayTitle: { fontSize: 16, fontWeight: FONT_WEIGHT_BOLD, color: TEXT, textAlign: 'center' },
+  overlaySubtitle: { fontSize: FONT_SIZE_BODY, color: '#7A6F63', textAlign: 'center' },
   retryButton: { backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 20, paddingVertical: 10, marginTop: 4 },
-  retryButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
+  retryButtonText: { color: 'white', fontWeight: FONT_WEIGHT_SEMIBOLD, fontSize: FONT_SIZE_BODY },
   // Full-screen overlay, not a fixed-320px sidebar like the web layout -
   // a phone-width sidebar squeezes the map into an unusable sliver.
   panel: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'white', zIndex: 2000 },
@@ -984,12 +990,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
   },
-  panelTitle: { fontSize: 18, fontWeight: '700', color: TEXT, flex: 1, paddingRight: 8 },
+  panelTitle: { fontSize: 18, fontWeight: FONT_WEIGHT_BOLD, color: TEXT, flex: 1, paddingRight: 8 },
   panelHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  suggestEditLink: { fontSize: 12, fontWeight: '600', color: ACCENT },
+  suggestEditLink: { fontSize: FONT_SIZE_SMALL, fontWeight: FONT_WEIGHT_SEMIBOLD, color: ACCENT },
   panelCloseHit: { padding: 8 },
   panelClose: { fontSize: 16, color: TEXT_DIM },
   checkbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1, borderColor: BORDER, alignItems: 'center', justifyContent: 'center' },
   checkboxChecked: { backgroundColor: ACCENT, borderColor: ACCENT },
-  checkboxMark: { color: 'white', fontSize: 12, fontWeight: '700' },
+  checkboxMark: { color: 'white', fontSize: FONT_SIZE_SMALL, fontWeight: FONT_WEIGHT_BOLD },
 });
