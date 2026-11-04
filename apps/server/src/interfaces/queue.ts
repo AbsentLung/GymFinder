@@ -1,9 +1,6 @@
 // Business code only imports `queue` from src/queue/index.ts, never
-// pg-boss or bullmq directly - keeps it mode-agnostic.
-//
-// Named levels, not a raw number - pg-boss and BullMQ order priority in
-// OPPOSITE directions. Each implementation maps these to its own
-// correct numbers internally.
+// pg-boss or bullmq directly - keeps it mode-agnostic. Named priority
+// levels, not a raw number - the two backends order priority oppositely.
 export type JobPriority = "low" | "normal" | "high"
 
 export interface JobOptions {
