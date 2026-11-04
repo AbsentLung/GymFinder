@@ -50,6 +50,15 @@ export function getCountryCurrency(countryCode: string, countryToCurrency: Recor
   return countryToCurrency[countryCode] || "USD"
 }
 
+// Covers the currencies gym-panels.tsx's CURRENCY_SYMBOLS already
+// renders, plus common USD/EUR/GBP markets. Falls back to USD.
+export const COUNTRY_TO_CURRENCY: Record<string, string> = {
+  TH: "THB", ID: "IDR", VN: "VND", PH: "PHP", MY: "MYR", SG: "SGD",
+  JP: "JPY", KR: "KRW", CN: "CNY", IN: "INR", KH: "KHR", LA: "LAK", MM: "MMK",
+  US: "USD", GB: "GBP", AU: "AUD", NZ: "NZD",
+  DE: "EUR", FR: "EUR", ES: "EUR", IT: "EUR", PT: "EUR", NL: "EUR", IE: "EUR", GR: "EUR", AT: "EUR", FI: "EUR",
+}
+
 // Pure - takes the already-fetched rates object directly.
 export function convertToUsdCents(amount: number, currency: string, rates: Record<string, number>): number {
   if (currency === "USD") return Math.round(amount * 100)
@@ -58,14 +67,8 @@ export function convertToUsdCents(amount: number, currency: string, rates: Recor
   return Math.round((amount / rate) * 100)
 }
 
-// ISO 4217 minor-unit exponent, for a handful of zero-decimal currencies
-// this app's own region (SE Asia) actually sees - IDR above all
-// (confirmed against API.md's own `gym_prices` examples: a 150000
-// "amountMinor" IDR day pass converts to 950 usdCents, which only works
-// out ($9.50 for a day pass, 150000 IDR at a realistic rate) if 150000
-// IS the whole-Rupiah amount, not 150000 IDR-cents - IDR has no
-// subdivision used in practice). Every other currency this app handles
-// defaults to 2 (cents, satang, etc.) - the common case.
+// Zero-decimal currencies this app's SE Asia region sees - everything
+// else defaults to 2 (cents, satang, etc.).
 const ZERO_DECIMAL_CURRENCIES = new Set(["IDR", "JPY", "KRW", "VND", "KHR", "LAK", "MMK"])
 
 export function amountMinorToMajor(amountMinor: number, currency: string): number {
@@ -77,6 +80,34 @@ export function amountMinorToMajor(amountMinor: number, currency: string): numbe
 // number the chat LLM reports from a page it read, src/jobs/chat.ts).
 export function amountMajorToMinor(amountMajor: number, currency: string): number {
   return Math.round(ZERO_DECIMAL_CURRENCIES.has(currency) ? amountMajor : amountMajor * 100)
+}
+
+// To ~2 significant figures - a converted price shouldn't show noisy
+// decimals (347.62 -> 350, 18003 -> 18000).
+export function roundToSolidDigits(value: number): number {
+  if (value === 0) return 0
+  const magnitude = 10 ** (Math.floor(Math.log10(Math.abs(value))) - 1)
+  return Math.round(value / magnitude) * magnitude
+}
+
+// Inverse of convertToUsdCents, for display only - storage stays USD.
+export function convertUsdCentsToLocal(usdCents: number, currency: string, rates: Record<string, number>): number {
+  if (currency === "USD") return usdCents
+  const rate = rates[currency]
+  if (!rate) throw new Error(`Unknown currency code: ${currency}`)
+  const localMajor = roundToSolidDigits((usdCents / 100) * rate)
+  return amountMajorToMinor(localMajor, currency)
+}
+
+// Storage is always USD (gym_prices.usdCents) - this is what every read
+// path shows instead: the gym's own country's currency.
+export function toLocalDisplayPrice<T extends { amountMinor: number; currency: string; usdCents: number }>(
+  price: T,
+  countryCode: string | null,
+  rates: Record<string, number>
+): T {
+  const currency = getCountryCurrency(countryCode ?? "", COUNTRY_TO_CURRENCY)
+  return { ...price, currency, amountMinor: convertUsdCentsToLocal(price.usdCents, currency, rates) }
 }
 
 // Google Maps result-list links embed exact coordinates directly in the
@@ -236,14 +267,8 @@ export function geohash5ChildrenOf(geohash4: string): string[] {
   return GEOHASH_BASE32.split("").map((c) => geohash4 + c)
 }
 
-// The forward direction geohashToBounds doesn't need (PostGIS's
-// ST_GeoHash already covers lat/lng -> geohash for every column in this
-// app) but the seeding CLI does (scripts/seed.ts) - turning a
-// destination's bounding box into the geohash5 tiles that cover it
-// needs encoding arbitrary points, not just decoding a geohash we
-// already have. Standard geohash encode: the mirror of
-// geohashToBounds's decode loop, narrowing the same lat/lng ranges but
-// building up bits instead of reading them off.
+// The encode direction - needed by scripts/seed.ts to turn a
+// destination bbox into covering tiles; PostGIS covers decode elsewhere.
 export function encodeGeohash(lat: number, lng: number, precision = 5): string {
   let minLat = -90
   let maxLat = 90
@@ -284,11 +309,8 @@ export function encodeGeohash(lat: number, lng: number, precision = 5): string {
   return geohash
 }
 
-// Grid-walks a bbox at half a geohash5 cell's own span - oversamples on
-// purpose (duplicates are deduped by the Set) so a thin sliver of a
-// cell near the bbox's edge is never skipped the way stepping by one
-// full cell-width could, since geohash5's grid isn't aligned to the
-// bbox's own corner.
+// Grid-walks at half a cell's span so no edge sliver is skipped;
+// oversampling is harmless (the Set dedupes).
 export function geohash5TilesCoveringBbox(bbox: Bbox): string[] {
   const sample = geohashToBounds(encodeGeohash(bbox.minLat, bbox.minLng, 5))
   const latStep = (sample.maxLat - sample.minLat) / 2
