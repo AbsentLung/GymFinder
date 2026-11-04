@@ -1,9 +1,6 @@
-// Mounts Better Auth at /v1/auth/* - adapts Fastify's request/reply to
-// the Fetch API Request/Response its handler expects.
-//
-// Not using `toNodeHandler`/`reply.hijack()`: that hands Better Auth the
-// raw Node stream, but Fastify already consumed it into `request.body` -
-// re-serializing that instead avoids reading the stream twice.
+// Mounts Better Auth at /v1/auth/*, adapting Fastify's request/reply to
+// the Fetch API shape - not toNodeHandler, since Fastify already
+// consumed the body stream that would need.
 import type { FastifyInstance } from "fastify"
 import { auth } from "../auth.js"
 
