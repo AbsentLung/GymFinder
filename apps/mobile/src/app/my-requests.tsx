@@ -168,39 +168,42 @@ const TEXT_MUTED = '#A9ADB3';
 const TEXT_DIM = '#777D84';
 const ERROR = '#E9643A';
 const BORDER = '#2C3034';
+const FONT_SIZE_TINY = 11;
+const FONT_SIZE_BODY = 13;
+const FONT_WEIGHT_SEMIBOLD = '600';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, padding: 24, gap: 14, alignItems: 'center' },
   title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 26, color: TEXT, width: '100%', maxWidth: 640 },
-  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: 13, color: TEXT_MUTED },
+  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: FONT_SIZE_BODY, color: TEXT_MUTED },
   submitButton: { backgroundColor: ACCENT, borderRadius: 10, paddingVertical: 12, paddingHorizontal: 20 },
   submitButtonText: { color: BG, fontWeight: '700', fontSize: 14 },
   filterRow: { flexDirection: 'row', gap: 8, width: '100%', maxWidth: 640, flexWrap: 'wrap', alignItems: 'center' },
   chip: { borderWidth: 1, borderColor: BORDER, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
   chipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
-  chipText: { color: TEXT_MUTED, fontSize: 12, fontWeight: '600' },
+  chipText: { color: TEXT_MUTED, fontSize: 12, fontWeight: FONT_WEIGHT_SEMIBOLD },
   chipTextActive: { color: BG },
   refreshButton: { marginLeft: 'auto', paddingHorizontal: 8, paddingVertical: 7 },
-  refreshButtonText: { color: ACCENT, fontSize: 12, fontWeight: '600' },
-  error: { color: ERROR, fontSize: 13 },
+  refreshButtonText: { color: ACCENT, fontSize: 12, fontWeight: FONT_WEIGHT_SEMIBOLD },
+  error: { color: ERROR, fontSize: FONT_SIZE_BODY },
   list: { width: '100%', maxWidth: 640, flex: 1 },
   listContent: { gap: 12, paddingBottom: 24 },
   row: { borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 14, gap: 6, backgroundColor: '#1B1E21' },
   rowHeader: { flexDirection: 'row', justifyContent: 'space-between' },
   rowType: {
     fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
-    fontSize: 11,
+    fontSize: FONT_SIZE_TINY,
     color: ACCENT,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  rowStatus: { fontSize: 11, color: TEXT_DIM, fontWeight: '600', textTransform: 'uppercase' },
+  rowStatus: { fontSize: FONT_SIZE_TINY, color: TEXT_DIM, fontWeight: FONT_WEIGHT_SEMIBOLD, textTransform: 'uppercase' },
   rowStatusFailed: { color: ERROR },
   rowStatusCompleted: { color: ACCENT },
-  rowSummary: { color: TEXT, fontSize: 14, fontWeight: '600' },
-  rowMeta: { color: '#6C7177', fontSize: 11 },
+  rowSummary: { color: TEXT, fontSize: 14, fontWeight: FONT_WEIGHT_SEMIBOLD },
+  rowMeta: { color: '#6C7177', fontSize: FONT_SIZE_TINY },
   retryButton: { alignSelf: 'flex-start', marginTop: 6, borderWidth: 1, borderColor: ACCENT, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
-  retryButtonText: { color: ACCENT, fontWeight: '700', fontSize: 13 },
+  retryButtonText: { color: ACCENT, fontWeight: '700', fontSize: FONT_SIZE_BODY },
   loadMoreButton: { alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 20 },
-  loadMoreButtonText: { color: ACCENT, fontSize: 13, fontWeight: '600' },
+  loadMoreButtonText: { color: ACCENT, fontSize: FONT_SIZE_BODY, fontWeight: FONT_WEIGHT_SEMIBOLD },
 });
