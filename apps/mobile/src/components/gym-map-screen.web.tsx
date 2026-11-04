@@ -95,6 +95,12 @@ const TEXT = '#1C2430';
 const TEXT_DIM = '#6B7680';
 const BORDER = '#DDE2E6';
 const PLACEHOLDER_COLOR = '#9AA3AB';
+const FONT_SIZE_TINY = 11;
+const FONT_SIZE_SMALL = 12;
+const FONT_SIZE_BODY = 13;
+const FONT_SIZE_LARGE = 14;
+const FONT_WEIGHT_SEMIBOLD = '600';
+const FONT_WEIGHT_BOLD = '700';
 
 // Only coordinates go through the clustering math - the real gym is
 // joined back in by id afterward.
@@ -888,7 +894,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  backButtonText: { fontSize: 13, fontWeight: '600', color: TEXT },
+  backButtonText: { fontSize: FONT_SIZE_BODY, fontWeight: FONT_WEIGHT_SEMIBOLD, color: TEXT },
   searchFilterWrap: {
     position: 'absolute',
     top: 56,
@@ -913,7 +919,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  searchFilterClearText: { fontSize: 13, color: TEXT_DIM },
+  searchFilterClearText: { fontSize: FONT_SIZE_BODY, color: TEXT_DIM },
   categoryFilterWrap: {
     position: 'absolute',
     top: 96,
@@ -934,7 +940,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  categoryFilterChevron: { fontSize: 11, color: TEXT_DIM },
+  categoryFilterChevron: { fontSize: FONT_SIZE_TINY, color: TEXT_DIM },
   categoryDropdown: {
     position: 'absolute',
     top: '100%',
@@ -958,7 +964,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  categoryDropdownRowText: { fontSize: 13, color: TEXT, flex: 1 },
+  categoryDropdownRowText: { fontSize: FONT_SIZE_BODY, color: TEXT, flex: 1 },
   dropInFilter: {
     position: 'absolute',
     top: 136,
@@ -975,7 +981,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  dropInFilterText: { fontSize: 13, color: TEXT, fontWeight: '600' },
+  dropInFilterText: { fontSize: FONT_SIZE_BODY, color: TEXT, fontWeight: FONT_WEIGHT_SEMIBOLD },
   trialFilter: {
     position: 'absolute',
     top: 176,
@@ -1002,9 +1008,9 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  priceRowName: { fontSize: 14, color: TEXT, flex: 1, paddingRight: 8 },
-  priceRowPrice: { fontSize: 14, fontWeight: '700', color: ACCENT },
-  priceRowPriceSuggested: { fontSize: 14, fontWeight: '700', color: '#B8860B' },
+  priceRowName: { fontSize: FONT_SIZE_LARGE, color: TEXT, flex: 1, paddingRight: 8 },
+  priceRowPrice: { fontSize: FONT_SIZE_LARGE, fontWeight: FONT_WEIGHT_BOLD, color: ACCENT },
+  priceRowPriceSuggested: { fontSize: FONT_SIZE_LARGE, fontWeight: FONT_WEIGHT_BOLD, color: '#B8860B' },
   priceDivider: {
     paddingTop: 14,
     marginTop: 4,
@@ -1012,8 +1018,8 @@ const styles = StyleSheet.create({
     borderTopColor: BORDER,
   },
   priceDividerText: {
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: FONT_SIZE_TINY,
+    fontWeight: FONT_WEIGHT_SEMIBOLD,
     color: '#8A94A0',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -1044,7 +1050,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  addGymButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
+  addGymButtonText: { color: 'white', fontWeight: FONT_WEIGHT_SEMIBOLD, fontSize: FONT_SIZE_BODY },
   // Small ambient note, not attention-grabbing - fires a lot while panning.
   osmLoadingNote: {
     position: 'absolute',
@@ -1056,7 +1062,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     zIndex: 900,
   },
-  osmLoadingNoteText: { color: 'white', fontSize: 11 },
+  osmLoadingNoteText: { color: 'white', fontSize: FONT_SIZE_TINY },
   findMoreMessage: {
     position: 'absolute',
     top: 56,
@@ -1069,7 +1075,7 @@ const styles = StyleSheet.create({
     boxShadow: '0 1px 4px rgba(0,0,0,0.2)' as unknown as undefined,
     zIndex: 999,
   },
-  findMoreMessageText: { fontSize: 12, color: TEXT },
+  findMoreMessageText: { fontSize: FONT_SIZE_SMALL, color: TEXT },
   // zIndex below topRightButtons so the button pops against this dim.
   // A real Pressable so clicking the map also dismisses the nudge.
   scanNudgeOverlay: {
@@ -1094,7 +1100,7 @@ const styles = StyleSheet.create({
     boxShadow: '0 4px 16px rgba(0,0,0,0.3)' as unknown as undefined,
     zIndex: 960,
   },
-  scanNudgeMessageText: { fontSize: 14, color: TEXT, textAlign: 'center', lineHeight: 20 },
+  scanNudgeMessageText: { fontSize: FONT_SIZE_LARGE, color: TEXT, textAlign: 'center', lineHeight: 20 },
   // top/left set inline from the measured findMoreButtonLayout.
   scanNudgeArrow: {
     position: 'absolute',
@@ -1118,9 +1124,9 @@ const styles = StyleSheet.create({
     gap: 10,
     zIndex: 1000,
   },
-  placingHintText: { color: 'white', fontSize: 13 },
+  placingHintText: { color: 'white', fontSize: FONT_SIZE_BODY },
   // @ts-expect-error - web-only cursor hint, fine for the demo
-  placingHintCancel: { color: PLACEHOLDER_COLOR, fontSize: 13, fontWeight: '600', cursor: 'pointer' },
+  placingHintCancel: { color: PLACEHOLDER_COLOR, fontSize: FONT_SIZE_BODY, fontWeight: FONT_WEIGHT_SEMIBOLD, cursor: 'pointer' },
   overlay: {
     position: 'absolute',
     top: 0,
@@ -1134,8 +1140,8 @@ const styles = StyleSheet.create({
     zIndex: 1500,
     paddingHorizontal: 40,
   },
-  overlayTitle: { fontSize: 16, fontWeight: '700', color: TEXT, textAlign: 'center' },
-  overlaySubtitle: { fontSize: 13, color: '#7A6F63', textAlign: 'center' },
+  overlayTitle: { fontSize: 16, fontWeight: FONT_WEIGHT_BOLD, color: TEXT, textAlign: 'center' },
+  overlaySubtitle: { fontSize: FONT_SIZE_BODY, color: '#7A6F63', textAlign: 'center' },
   retryButton: {
     backgroundColor: ACCENT,
     borderRadius: 8,
@@ -1145,7 +1151,7 @@ const styles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  retryButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
+  retryButtonText: { color: 'white', fontWeight: FONT_WEIGHT_SEMIBOLD, fontSize: FONT_SIZE_BODY },
   panel: {
     width: 320,
     backgroundColor: 'white',
@@ -1160,9 +1166,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
   },
-  panelTitle: { fontSize: 18, fontWeight: '700', color: TEXT, flex: 1, paddingRight: 8 },
+  panelTitle: { fontSize: 18, fontWeight: FONT_WEIGHT_BOLD, color: TEXT, flex: 1, paddingRight: 8 },
   panelHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  suggestEditLink: { fontSize: 12, fontWeight: '600', color: ACCENT },
+  suggestEditLink: { fontSize: FONT_SIZE_SMALL, fontWeight: FONT_WEIGHT_SEMIBOLD, color: ACCENT },
   // @ts-expect-error - web-only cursor hint, fine for the demo
   panelCloseHit: { cursor: 'pointer', padding: 8 },
   panelClose: { fontSize: 16, color: TEXT_DIM },
@@ -1176,5 +1182,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxChecked: { backgroundColor: ACCENT, borderColor: ACCENT },
-  checkboxMark: { color: 'white', fontSize: 12, fontWeight: '700' },
+  checkboxMark: { color: 'white', fontSize: FONT_SIZE_SMALL, fontWeight: FONT_WEIGHT_BOLD },
 });
