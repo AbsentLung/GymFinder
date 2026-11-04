@@ -5,13 +5,8 @@ import { Queue, Worker, type ConnectionOptions } from "bullmq"
 import { Redis } from "ioredis"
 import type { QueueInterface, JobOptions, JobHandler, JobPriority } from "../interfaces/queue.js"
 
-// BullMQ's own priority is "lower number runs first" - the OPPOSITE of
-// pg-boss's "higher number runs first" (src/queue/pgboss-queue.ts).
-// Every level gets an explicit number, including "normal": BullMQ also
-// treats a job with NO priority set as more urgent than any explicitly
-// prioritized job (confirmed against its own JobsOptions doc comment,
-// not assumed) - leaving "normal" unset would put it ahead of "high"
-// instead of between "high" and "low".
+// BullMQ: lower number runs first, opposite of pg-boss. "normal" needs
+// an explicit value too - an unset priority runs ahead of "high".
 const PRIORITY_RANK: Record<JobPriority, number> = { high: 1, normal: 50, low: 100 }
 
 export class BullMqQueue implements QueueInterface {
