@@ -1,7 +1,5 @@
-// Marks overdue requests "timed_out". add_gym/update_gym: only when the
-// bot step itself never finished (admin-wait is never a timeout,
-// however old). sweep: always sets a terminal status itself, so
-// 'pending' past its deadline means the job crashed outright.
+// Marks overdue requests "timed_out" - admin-wait is never a timeout,
+// only an unfinished bot step or a crashed sweep job is.
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { notifyRequestStatusChange } from "./push.js"

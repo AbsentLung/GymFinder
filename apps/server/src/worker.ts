@@ -1,7 +1,5 @@
-// Worker entry point - picks up jobs the API enqueued. registerWorkerJobs
-// is exported so src/dev.ts can register the same processors in demo
-// mode's combined process; this file's own main() is the scale-mode
-// standalone worker.
+// Worker entry point - registerWorkerJobs is exported so dev.ts can
+// reuse it in demo mode's combined process; main() below is scale-only.
 import { queue } from "./queue/index.js"
 import { refreshTile } from "./jobs/tile-refresh.js"
 import { processBotReviewChange } from "./jobs/bot-review-worker.js"
