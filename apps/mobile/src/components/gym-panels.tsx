@@ -474,11 +474,11 @@ export function SubmitGymForm({
         <Text style={panelStyles.panelLabel}>Submitted</Text>
         {result.approved ? (
           <Text style={panelStyles.panelValue}>
-            Your gym is <Text style={{ fontWeight: '700' }}>live now</Text> — it checked out automatically.
+            Your gym is <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>live now</Text> — it checked out automatically.
           </Text>
         ) : (
           <Text style={panelStyles.panelValue}>
-            This gym is now <Text style={{ fontWeight: '700' }}>awaiting admin review</Text>
+            This gym is now <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>awaiting admin review</Text>
             {result.reason ? ` (${result.reason})` : ''}. That can take a few days.
           </Text>
         )}
@@ -604,11 +604,11 @@ export function SuggestEditForm({
         <Text style={panelStyles.panelLabel}>Submitted</Text>
         {result.approved ? (
           <Text style={panelStyles.panelValue}>
-            Confirmed — <Text style={{ fontWeight: '700' }}>{field.label}</Text> updated right away.
+            Confirmed — <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>{field.label}</Text> updated right away.
           </Text>
         ) : (
           <Text style={panelStyles.panelValue}>
-            This edit is now <Text style={{ fontWeight: '700' }}>awaiting admin review</Text>
+            This edit is now <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>awaiting admin review</Text>
             {result.reason ? ` (${result.reason})` : ''}.
           </Text>
         )}
@@ -711,12 +711,16 @@ const BORDER = '#DDE2E6';
 const GOLD = '#E0A500';
 const BG_MUTED = '#F7F8F9';
 export const PLACEHOLDER_COLOR = '#9AA3AB';
+const FONT_SIZE_SMALL = 12;
+const FONT_SIZE_BODY = 13;
+const FONT_WEIGHT_SEMIBOLD = '600';
+export const FONT_WEIGHT_BOLD = '700';
 
 export const panelStyles = StyleSheet.create({
   panelScroll: { flex: 1 },
   panelScrollContent: { padding: 20, gap: 20 },
   panelRow: { gap: 8 },
-  panelLabel: { fontSize: 11, fontWeight: '600', color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: 0.5 },
+  panelLabel: { fontSize: 11, fontWeight: FONT_WEIGHT_SEMIBOLD, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: 0.5 },
   panelValue: { fontSize: 14, color: TEXT, lineHeight: 20 },
   sectionHeader: {
     flexDirection: 'row',
@@ -725,7 +729,7 @@ export const panelStyles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  sectionChevron: { fontSize: 12, color: TEXT_MUTED },
+  sectionChevron: { fontSize: FONT_SIZE_SMALL, color: TEXT_MUTED },
   sectionHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   reviewForm: {
     gap: 8,
@@ -739,7 +743,7 @@ export const panelStyles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    fontSize: 13,
+    fontSize: FONT_SIZE_BODY,
     backgroundColor: 'white',
   },
   textarea: { minHeight: 60, textAlignVertical: 'top' },
@@ -748,7 +752,7 @@ export const panelStyles = StyleSheet.create({
   starHit: { cursor: 'pointer', padding: 2 },
   star: { fontSize: 18, color: '#D7DBDF' },
   starFilled: { color: GOLD },
-  editLink: { color: ACCENT, fontSize: 12, fontWeight: '700' },
+  editLink: { color: ACCENT, fontSize: FONT_SIZE_SMALL, fontWeight: FONT_WEIGHT_BOLD },
   submitButton: {
     backgroundColor: ACCENT,
     borderRadius: 8,
@@ -756,7 +760,7 @@ export const panelStyles = StyleSheet.create({
     alignItems: 'center',
   },
   submitButtonDisabled: { opacity: 0.6 },
-  submitButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
+  submitButtonText: { color: 'white', fontWeight: FONT_WEIGHT_SEMIBOLD, fontSize: FONT_SIZE_BODY },
   reviewCard: {
     gap: 4,
     paddingTop: 10,
@@ -764,14 +768,14 @@ export const panelStyles = StyleSheet.create({
     borderTopColor: '#EFEFEF',
   },
   reviewCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  reviewAuthor: { fontSize: 13, fontWeight: '700', color: TEXT },
-  reviewStars: { fontSize: 12, color: GOLD },
+  reviewAuthor: { fontSize: FONT_SIZE_BODY, fontWeight: FONT_WEIGHT_BOLD, color: TEXT },
+  reviewStars: { fontSize: FONT_SIZE_SMALL, color: GOLD },
   chatBox: { gap: 8 },
   chatBubble: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' },
   chatBubbleUser: { backgroundColor: ACCENT, alignSelf: 'flex-end' },
   chatBubbleAssistant: { backgroundColor: BG_MUTED, alignSelf: 'flex-start' },
-  chatBubbleUserText: { color: 'white', fontSize: 13, lineHeight: 18 },
-  chatBubbleAssistantText: { color: TEXT, fontSize: 13, lineHeight: 18 },
+  chatBubbleUserText: { color: 'white', fontSize: FONT_SIZE_BODY, lineHeight: 18 },
+  chatBubbleAssistantText: { color: TEXT, fontSize: FONT_SIZE_BODY, lineHeight: 18 },
   chatInputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
   chatInput: { flex: 1 },
   chatInputLarge: { minHeight: 72, textAlignVertical: 'top' },
@@ -779,6 +783,6 @@ export const panelStyles = StyleSheet.create({
   editFieldPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   editFieldChip: { borderWidth: 1, borderColor: BORDER, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
   editFieldChipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
-  editFieldChipText: { fontSize: 12, color: TEXT_DIM, fontWeight: '600' },
+  editFieldChipText: { fontSize: FONT_SIZE_SMALL, color: TEXT_DIM, fontWeight: FONT_WEIGHT_SEMIBOLD },
   editFieldChipTextActive: { color: 'white' },
 });
