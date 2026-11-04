@@ -41,10 +41,8 @@ import {
 } from '@/components/gym-panels';
 import { LEAFLET_WEBVIEW_HTML } from '@/components/leaflet-webview-html';
 
-// Native's version of gym-map-screen.web.tsx - same data/filtering logic,
-// but the map is a WebView running real Leaflet (react-leaflet crashes on
-// native). Clustering runs here via supercluster (pure data, no DOM) and
-// the circles get posted to the WebView to draw.
+// Native's version of gym-map-screen.web.tsx - the map is a WebView
+// running real Leaflet (react-leaflet crashes on native).
 const FILTERS_VISIBLE_AT_ZOOM = 11;
 
 // Plain Pressable can't take an Animated.Value in its style.
