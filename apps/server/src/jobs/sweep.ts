@@ -1,8 +1,5 @@
-// A bot sweeps an area on Google Maps for missing gyms. Google Maps is
-// itself one of FR-25's verified sources, so a sweep-found gym's
-// gym_changes row is created already approved - no separate bot-review
-// pass needed. Starts with just name/lat/lng; a later chat question or
-// edit still goes through the normal pipeline.
+// Google Maps is a verified source (FR-25), so a sweep-found gym's
+// gym_changes row is created already approved - no bot-review needed.
 import { sql, eq } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, requests } from "../db/schema.js"
