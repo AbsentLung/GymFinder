@@ -1,17 +1,6 @@
-// A self-contained HTML page (Leaflet pulled from a CDN, not bundled)
-// that the native map screen loads into a WebView. This is the one place
-// Leaflet still runs on native - not directly (it's DOM-only, confirmed
-// this session it crashes immediately just from being imported into a
-// native JS bundle), but inside this WebView's own, separate DOM-having
-// JS context. The native side and this page talk over postMessage only:
-// native sends setView/setMarkers/setClickMode, this page sends back
-// ready/markerTap/clusterTap/mapClick/viewportChanged/dragPrefetchPoint.
-// Deliberately dumb
-// on purpose - it knows nothing about gyms, categories, or filters, just
-// "draw circles at these coordinates, tell me when one's tapped." All
-// the actual business logic stays in TypeScript on the native side,
-// type-checked and consistent with the web implementation, rather than
-// being reimplemented twice in two languages.
+// Leaflet is DOM-only, so this runs inside a WebView's own DOM, talking
+// to the native side over postMessage. Deliberately dumb - just draws
+// circles and reports taps; all real logic stays in TypeScript.
 export const LEAFLET_WEBVIEW_HTML = `<!DOCTYPE html>
 <html>
 <head>

@@ -4,11 +4,8 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '@/auth-context';
 
-// Only email+password works right now - Google/Facebook need real OAuth
-// app credentials (client id/secret) registered with each provider plus
-// a callback URL pointing at wherever this server runs, neither of which
-// exists yet for this demo, so there's no sign-in button for them to wire
-// up to yet.
+// Email+password only - Google/Facebook need real OAuth credentials
+// this demo doesn't have yet.
 export default function AuthScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ mode?: string }>();
