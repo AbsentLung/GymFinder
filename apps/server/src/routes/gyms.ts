@@ -6,6 +6,8 @@ import { sql, eq, and, desc, lt } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymPrices, reviews } from "../db/schema.js"
 import { requireUser, getSessionUser } from "../auth-guard.js"
+import { toLocalDisplayPrice } from "../lib.js"
+import { getFxRates } from "../fx.js"
 
 interface GymDetailRow {
   [key: string]: unknown
@@ -23,12 +25,13 @@ interface GymDetailRow {
   updated_at: string
   rating: number | null
   review_count: number
+  country_code: string | null
 }
 
 async function fetchGymDetail(id: number) {
   const result = await db.execute<GymDetailRow>(sql`
     SELECT g.id, g.name, ST_X(g.location) AS lng, ST_Y(g.location) AS lat, g.address, g.description,
-           g.categories, g.accepts_drop_in, g.has_trial, g.details, g.status, g.updated_at,
+           g.categories, g.accepts_drop_in, g.has_trial, g.details, g.status, g.updated_at, g.country_code,
            (SELECT avg(rating)::float FROM reviews WHERE gym_id = g.id) AS rating,
            (SELECT count(*)::int FROM reviews WHERE gym_id = g.id) AS review_count
     FROM gyms g WHERE g.id = ${id}
@@ -37,6 +40,8 @@ async function fetchGymDetail(id: number) {
   if (!gym) return null
 
   const prices = await db.select().from(gymPrices).where(eq(gymPrices.gymId, id))
+  // Stored as USD always - converted to the gym's local currency here.
+  const rates = prices.length > 0 ? await getFxRates() : {}
   // trialDetails/openingHours promoted to top-level fields; `details`
   // carries whatever's left of the jsonb catch-all.
   const { trialDetails, openingHours, ...restDetails } = (gym.details ?? {}) as Record<string, unknown>
@@ -60,9 +65,7 @@ async function fetchGymDetail(id: number) {
     details: restDetails,
     prices: prices.map((p) => ({
       kind: p.kind,
-      amountMinor: p.amountMinor,
-      currency: p.currency,
-      usdCents: p.usdCents,
+      ...toLocalDisplayPrice({ amountMinor: p.amountMinor, currency: p.currency, usdCents: p.usdCents }, gym.country_code, rates),
       sourceKind: p.sourceKind,
       sourceUrl: p.sourceUrl,
       verifiedBy: p.verifiedBy,
