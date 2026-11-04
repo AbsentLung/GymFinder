@@ -5,10 +5,8 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useAuth } from '@/auth-context';
 import { API_BASE_URL } from '@/config';
 
-// The admin review queue. gym_changes.proposed is a discriminated union
-// server-side (bot-review.ts's ProposedChange) but typed loosely here -
-// this screen only shows proposals, and a few legacy rows predate that
-// union's `kind` field entirely.
+// The admin review queue. Typed loosely - a few legacy rows predate
+// bot-review.ts's ProposedChange union's `kind` field entirely.
 interface ProposedLoose {
   kind?: string;
   [key: string]: unknown;
