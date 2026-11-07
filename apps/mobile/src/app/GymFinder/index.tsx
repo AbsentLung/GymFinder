@@ -122,7 +122,7 @@ function AccountCorner() {
       {user ? (
         <>
           <Pressable onPress={() => router.push('/profile')}>
-            <Text style={styles.accountLink}>{user.name}</Text>
+            <Text style={styles.accountLink}>{user.name} ⚙️</Text>
           </Pressable>
           {user.isAdmin && (
             <Pressable onPress={() => router.push('/admin')}>
