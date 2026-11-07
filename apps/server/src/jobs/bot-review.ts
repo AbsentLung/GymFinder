@@ -13,9 +13,18 @@ import { convertToUsdCents, isDuplicateMatch, looksLikeRealCoordinates, amountMi
 import type { ToolDef } from "../interfaces/llm.js"
 
 export type PriceKind = "day_pass" | "week_pass" | "month_pass"
-export type PriceSourceKind = "gym_website" | "price_menu" | "user" | "review" | "chat"
+export type PriceSourceKind = "gym_website" | "price_menu" | "user" | "review" | "chat" | "sweep_research"
 export const NON_PRICE_FIELDS = ["name", "address", "description", "categories", "acceptsDropIn", "hasTrial"] as const
 export type NonPriceField = (typeof NON_PRICE_FIELDS)[number]
+
+// A tool-calling model can hand back a wrong-typed value (e.g. "unknown"
+// for a boolean field) - applyProposedChange writes it straight into a
+// typed column, so this catches it before it ever reaches gym_changes.
+export function normalizeFieldValue(field: NonPriceField, value: unknown): unknown | null {
+  if (field === "acceptsDropIn" || field === "hasTrial") return typeof value === "boolean" ? value : null
+  if (field === "categories") return Array.isArray(value) && value.every((c) => typeof c === "string") ? value : null
+  return typeof value === "string" ? value : null
+}
 
 export interface PriceProposal {
   priceKind: PriceKind

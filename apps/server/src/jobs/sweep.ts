@@ -9,6 +9,7 @@ import { GoogleMapsBlockedError } from "../sources/google-maps-source.js"
 import { upsertGym } from "./gym-upsert.js"
 import { notifyRequestStatusChange } from "./push.js"
 import type { ProposedChange } from "./bot-review.js"
+import { queue } from "../queue/index.js"
 
 // Process-local backoff state - doubles on every consecutive Google
 // block, up to a 6-hour cap; a clean scrape resets it.
@@ -64,6 +65,8 @@ export async function processSweep({ requestId, geohash5 }: { requestId: number;
         reviewStatus: "approved",
         decidedBy: "bot",
       })
+      // Only name/coords are known yet - low priority, non-blocking.
+      await queue.add("research-gym", { gymId: result.gymId }, { priority: "low", jobId: `research-gym-${result.gymId}` })
     }
   }
 
