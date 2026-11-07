@@ -142,6 +142,7 @@ export default function MyRequestsScreen() {
                 {r.status}
               </Text>
             </View>
+            {r.gymName && <Text style={styles.rowGymName}>{r.gymName}</Text>}
             <Text style={styles.rowSummary}>{summarize(r)}</Text>
             <Text style={styles.rowMeta}>{new Date(r.createdAt).toLocaleString()}</Text>
             {r.status === 'failed' && (
@@ -200,6 +201,7 @@ const styles = StyleSheet.create({
   rowStatus: { fontSize: FONT_SIZE_TINY, color: TEXT_DIM, fontWeight: FONT_WEIGHT_SEMIBOLD, textTransform: 'uppercase' },
   rowStatusFailed: { color: ERROR },
   rowStatusCompleted: { color: ACCENT },
+  rowGymName: { color: TEXT, fontSize: 16, fontWeight: '700' },
   rowSummary: { color: TEXT, fontSize: 14, fontWeight: FONT_WEIGHT_SEMIBOLD },
   rowMeta: { color: '#6C7177', fontSize: FONT_SIZE_TINY },
   retryButton: { alignSelf: 'flex-start', marginTop: 6, borderWidth: 1, borderColor: ACCENT, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
