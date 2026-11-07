@@ -75,6 +75,19 @@ function toProposedChange(body: ChangeBody): ProposedChange {
   return { kind: "field", field: body.field as (typeof NON_PRICE_FIELDS)[number], newValue: body.newValue, justification: body.description }
 }
 
+// add_gym carries its own proposed name; update_gym only has a gymId,
+// so the gym's current name is looked up instead.
+async function resolveGymName(request: typeof requests.$inferSelect, changes: (typeof gymChanges.$inferSelect)[]): Promise<string | null> {
+  if (request.kind === "add_gym") {
+    const input = request.input as { name?: string } | null
+    return input?.name ?? null
+  }
+  const gymId = changes[0]?.gymId
+  if (!gymId) return null
+  const [gym] = await db.select({ name: gyms.name }).from(gyms).where(eq(gyms.id, gymId))
+  return gym?.name ?? null
+}
+
 async function serializeRequest(requestId: number) {
   const [request] = await db.select().from(requests).where(eq(requests.id, requestId))
   if (!request) return null
@@ -87,6 +100,7 @@ async function serializeRequest(requestId: number) {
     deadline: request.deadline,
     result: request.result,
     failureReason: request.failureReason,
+    gymName: await resolveGymName(request, changes),
     changes: changes.map((c) => ({
       id: String(c.id),
       reviewStatus: c.reviewStatus,
