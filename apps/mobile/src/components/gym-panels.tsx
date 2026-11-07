@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, TextInput, View, ScrollView } from 'react-native';
 
@@ -430,7 +430,11 @@ export function SubmitGymForm({
   const { user, authHeaders } = useAuth();
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ approved: boolean; reason: string | null } | null>(null);
+  const [result, setResult] = useState<{ approved: boolean; reason: string | null; pending: boolean } | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   if (!user) {
     return (
@@ -455,12 +459,20 @@ export function SubmitGymForm({
       });
       if (!res.ok) throw new Error(`Submit gym failed: ${res.status}`);
       const created: GymRequest = await res.json();
-      const final = await pollRequest(created.id, authHeaders);
-      const change = final.changes[0];
-      setResult({ approved: change?.reviewStatus === 'approved', reason: change?.reason ?? null });
+      // Bot review runs real web searches - show "submitted" now rather
+      // than blocking on it, then refine in the background once it's done.
+      setResult({ approved: false, reason: null, pending: true });
       // No optimistic gym object - the server doesn't return a gym id
       // for add-gym (API.md 2.4). Next tile fetch picks it up if approved.
       onSubmitted(null);
+      pollRequest(created.id, authHeaders)
+        .then((final) => {
+          if (!mountedRef.current) return;
+          const change = final.changes[0];
+          setResult({ approved: change?.reviewStatus === 'approved', reason: change?.reason ?? null, pending: false });
+          onSubmitted(null);
+        })
+        .catch((e) => console.error('Failed to poll gym request status', e));
     } catch (e) {
       console.error('Failed to submit gym', e);
     } finally {
@@ -472,7 +484,9 @@ export function SubmitGymForm({
     return (
       <View style={panelStyles.panelRow}>
         <Text style={panelStyles.panelLabel}>Submitted</Text>
-        {result.approved ? (
+        {result.pending ? (
+          <Text style={panelStyles.panelValue}>Your gym has been submitted — we&apos;re reviewing it now.</Text>
+        ) : result.approved ? (
           <Text style={panelStyles.panelValue}>
             Your gym is <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>live now</Text> — it checked out automatically.
           </Text>
@@ -540,7 +554,11 @@ export function SuggestEditForm({
   const [boolValue, setBoolValue] = useState(true);
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ approved: boolean; reason: string | null } | null>(null);
+  const [result, setResult] = useState<{ approved: boolean; reason: string | null; pending: boolean } | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   if (!user) {
     return (
@@ -586,11 +604,18 @@ export function SuggestEditForm({
       });
       if (!res.ok) throw new Error(`Edit request failed: ${res.status}`);
       const created: GymRequest = await res.json();
-      const final = await pollRequest(created.id, authHeaders);
-      const change = final.changes[0];
-      const approved = change?.reviewStatus === 'approved';
-      setResult({ approved, reason: change?.reason ?? null });
+      // Same as SubmitGymForm - don't block on bot review's own web
+      // searches before confirming the submission.
+      setResult({ approved: false, reason: null, pending: true });
       onDone(null); // the next tile/details fetch picks up the real change, same as SubmitGymForm.
+      pollRequest(created.id, authHeaders)
+        .then((final) => {
+          if (!mountedRef.current) return;
+          const change = final.changes[0];
+          setResult({ approved: change?.reviewStatus === 'approved', reason: change?.reason ?? null, pending: false });
+          onDone(null);
+        })
+        .catch((e) => console.error('Failed to poll edit request status', e));
     } catch (e) {
       console.error('Failed to submit edit request', e);
     } finally {
@@ -602,7 +627,9 @@ export function SuggestEditForm({
     return (
       <View style={panelStyles.panelRow}>
         <Text style={panelStyles.panelLabel}>Submitted</Text>
-        {result.approved ? (
+        {result.pending ? (
+          <Text style={panelStyles.panelValue}>Your edit has been submitted — we&apos;re reviewing it now.</Text>
+        ) : result.approved ? (
           <Text style={panelStyles.panelValue}>
             Confirmed — <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>{field.label}</Text> updated right away.
           </Text>
