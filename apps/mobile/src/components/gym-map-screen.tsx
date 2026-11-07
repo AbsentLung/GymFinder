@@ -193,7 +193,9 @@ export default function MapScreen() {
     setError(null);
     Promise.all(
       newTiles.map((tile) =>
-        fetch(`${API_BASE_URL}/v1/tiles/${tile}`)
+        // no-store - the browser's HTTP cache would otherwise serve a
+        // stale tile; fetchedTilesRef is a separate, app-level cache.
+        fetch(`${API_BASE_URL}/v1/tiles/${tile}`, { cache: 'no-store' })
           .then((r) => {
             if (!r.ok) throw new Error(`Tile fetch failed: ${r.status}`);
             return r.json();
