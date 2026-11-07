@@ -64,6 +64,13 @@ export async function placeAtPoint(lat: number, lng: number): Promise<Place> {
   return placeFromChain(result.rows[0]?.chain)
 }
 
+// A gym_changes row's place: its gym's, or for an add_gym with no gym yet, its proposed lat/lng.
+export async function placeForChange(gymId: number | null, proposed: unknown): Promise<Place | null> {
+  if (gymId) return placeForGym(gymId)
+  const p = (proposed ?? {}) as { lat?: unknown; lng?: unknown }
+  return typeof p.lat === "number" && typeof p.lng === "number" ? placeAtPoint(p.lat, p.lng) : null
+}
+
 export function placeFromChain(chain: unknown, postcode: string | null = null): Place {
   const c = (chain && typeof chain === "object" ? chain : {}) as Record<string, unknown>
   const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : null)
