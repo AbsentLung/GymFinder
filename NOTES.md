@@ -17,6 +17,7 @@ Decision log, unconfirmed assumptions and known limitations. One line each: deci
 - Fixed while testing: approving any add_gym failed (categories interpolated as a value list, "()" when empty). Now bound as text[] like category edits.
 - Assumption (unconfirmed): showing "City, Region, Country" under the address (same "Address" label, also when there's no address) counts as Joey's OK for that visible change, since the brief asks for it.
 - Stubbed: Photon is stubbed in the integration tests; the real service is never called by tests.
+- Limitation (blocking, open question 0): CGAZ ADM1/ADM2 are heavily simplified (Shanghai Municipality = 21 vertices), so central Shanghai, Hong Kong Island, central Lisbon and coastal San Juan miss their region/county. Roadmap item left unchecked until the boundary source is decided.
 - Limitation: no city wherever no allowed ADM3 polygon exists (incl. Indonesia, Thailand, USA, Vietnam), see open question 1.
 - Limitation: territories with no polygon at all (Réunion, French Polynesia, Aruba, ...) get country_code from Photon but no area.
 - Limitation: postcode only from OSM addr:postcode; Google Maps / website don't expose a structured postcode yet.

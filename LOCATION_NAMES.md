@@ -1,6 +1,6 @@
 # Location names for gyms
 
-Status: built on branch `phase-6-location-names-slice`, stacked on #33. Linked from [DESIGN.md](./DESIGN.md) and the [README roadmap](./README.md#roadmap).
+Status: mechanism built and tested on branch `phase-6-location-names-slice`, stacked on #33. **Boundary source needs a decision** (open question 0): CGAZ is too coarse in city centres. Linked from [DESIGN.md](./DESIGN.md) and the [README roadmap](./README.md#roadmap).
 
 ## Goal
 
@@ -138,6 +138,24 @@ flowchart LR
 - The full CGAZ + gbOpen load was run by hand for IDN, CHN, PRT, FRA, THA, USA and FIN into a throwaway database. It is not part of the automated tests (too large).
 
 ## Open questions
+
+0. **Blocking: CGAZ is too simplified for gym-scale lookups.** A real-data spot check (2026-11-07, seven countries loaded) found:
+
+   | Point | Result | Why |
+   |---|---|---|
+   | Central Shanghai | no region | "Shanghai Municipality" has **21 vertices** and stops at lng 121.41 |
+   | Hong Kong Central | China, not HK | the Hong Kong polygon leaves out Hong Kong Island (starts at lat 22.33) |
+   | Central Lisbon | no county | "Lisboa" county has 7 vertices |
+   | San Juan, Puerto Rico | no match | point on the coast, outside the simplified outline |
+
+   Inland points (Ubud, Bangkok, Chiang Mai, Helsinki, Paris, New York) were right. gbOpen Portugal ADM3 also has stray polygon parts (Arroios got Vila Real as its parent) and corrupted names ("Uni3O Das Freguesias De 6Vora…").
+
+   The jobs, API and tests don't depend on the source, so switching only changes `seed:areas`. Options:
+   - (a) OSM admin boundaries (ODbL, full detail, same source as our gyms; `admin_level` meaning varies per country);
+   - (b) gbOpen per-country full-resolution ADM1/ADM2 instead of CGAZ (licenses vary; still not consistently detailed);
+   - (c) keep CGAZ and accept nearby polygons within a tolerance (wrong near borders).
+
+   **Recommendation: (a).**
 
 1. **City coverage.** Polygons only give a city where gbOpen has ADM3 under an allowed license. ADM3 isn't "city" everywhere, and Indonesia, Thailand, the USA and Vietnam have none. Options:
    - (a) also run Photon when the deepest match isn't a city, and store a geometry-less city row;
