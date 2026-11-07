@@ -52,11 +52,7 @@ function summarizeProposed(p: ProposedLoose): string {
   if (isLegacyProposal(p)) {
     return `${p.field}: ${p.previousValue ?? '(none)'} → ${p.newValue} (legacy format)`;
   }
-  if (p.kind === 'add_gym') {
-    const lat = typeof p.lat === 'number' ? p.lat.toFixed(4) : p.lat;
-    const lng = typeof p.lng === 'number' ? p.lng.toFixed(4) : p.lng;
-    return `New gym: "${p.name}" at ${lat}, ${lng}`;
-  }
+  if (p.kind === 'add_gym') return `New gym: "${p.name}"`;
   if (p.kind === 'status') return `Status → ${p.newValue}`;
   if (p.kind === 'price') {
     return `${p.priceKind}: ${p.amountMinor} ${p.currency} (source: ${p.sourceKind}${p.sourceUrl ? `, ${p.sourceUrl}` : ''})`;
@@ -66,6 +62,16 @@ function summarizeProposed(p: ProposedLoose): string {
     return `${p.field} → ${value}`;
   }
   return JSON.stringify(p);
+}
+
+// add_gym proposals have no gymId yet, so their own lat/lng is the only
+// location info available; every other kind edits an existing gym.
+function changeCoordinates(c: AdminChange): { lat: number; lng: number } | null {
+  if (c.currentGym) return c.currentGym.location;
+  if (typeof c.proposed.lat === 'number' && typeof c.proposed.lng === 'number') {
+    return { lat: c.proposed.lat, lng: c.proposed.lng };
+  }
+  return null;
 }
 
 export default function AdminScreen() {
@@ -230,7 +236,9 @@ export default function AdminScreen() {
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
         {changes?.length === 0 && <Text style={styles.subtitle}>No changes match these filters.</Text>}
-        {changes?.map((c) => (
+        {changes?.map((c) => {
+          const coords = changeCoordinates(c);
+          return (
           <View key={c.id} style={styles.row}>
             <View style={styles.rowHeader}>
               <Text style={styles.rowType}>{c.gymId ? `Gym #${c.gymId}` : 'New gym'}</Text>
@@ -243,6 +251,11 @@ export default function AdminScreen() {
             {c.currentGym && (
               <Text style={styles.rowCurrent}>
                 Current: {c.currentGym.name} — {c.currentGym.address ?? 'no address on file'}
+              </Text>
+            )}
+            {coords && (
+              <Text style={styles.rowCurrent}>
+                Coordinates: {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
               </Text>
             )}
             {c.evidence?.reason && <Text style={styles.rowDescription}>Bot/admin note: “{c.evidence.reason}”</Text>}
@@ -300,7 +313,8 @@ export default function AdminScreen() {
               </>
             )}
           </View>
-        ))}
+          );
+        })}
         {nextCursor && (
           <Pressable style={styles.loadMoreButton} onPress={() => load(nextCursor)}>
             <Text style={styles.loadMoreButtonText}>Load more</Text>
