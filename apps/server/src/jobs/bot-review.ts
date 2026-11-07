@@ -347,10 +347,15 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
   }
   if (proposed.kind === "add_gym") {
     // Stamped so the weekly OSM refresh doesn't overwrite this for a year.
+    // Plain `${proposed.categories}` would drizzle-expand an empty array
+    // to a bare "()", which Postgres rejects outright - ARRAY[...] is
+    // valid for zero elements too, same construction the field-edit
+    // categories UPDATE below already uses.
+    const categoriesSql = sql`ARRAY[${sql.join(proposed.categories.map((c) => sql`${c}`), sql`, `)}]::text[]`
     const inserted = await tx.execute(sql`
       INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial, name_location_decided_at)
       VALUES (${proposed.name}, ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326),
-        ${proposed.address ?? null}, ${proposed.description ?? null}, ${proposed.categories},
+        ${proposed.address ?? null}, ${proposed.description ?? null}, ${categoriesSql},
         ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now())
       RETURNING id
     `)
