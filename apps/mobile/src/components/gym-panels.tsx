@@ -52,6 +52,7 @@ export interface GymDetails extends Gym {
   // TrialSection below).
   trial: { available: boolean | null; details: string | null };
   openingHours: string | null;
+  place: Place | null;
   prices: PriceEntry[];
   reviewCount: number;
   status: string;
@@ -158,6 +159,34 @@ export function acceptsDropIn(gym: { acceptsDropIn: boolean | null; dayPass: Day
 // names - one place to check either shape.
 export function isPriceVerified(price: DayPass | PriceEntry): boolean {
   return 'verified' in price ? price.verified : price.verifiedBy != null;
+}
+
+// Stored location names from the API (LOCATION_NAMES.md); every part may be missing.
+export interface Place {
+  city: string | null;
+  region: string | null;
+  county: string | null;
+  country: string | null;
+  countryCode: string | null;
+  postcode: string | null;
+}
+
+export function formatPlace(place: Place | null | undefined): string | null {
+  const parts = [place?.city, place?.region, place?.country].filter(Boolean);
+  return parts.length > 0 ? parts.join(', ') : null;
+}
+
+// "City, Region, Country" sits under the address, or replaces it when there is none.
+export function AddressRow({ address, place }: { address: string | null; place: Place | null | undefined }) {
+  const placeLine = formatPlace(place);
+  if (!address && !placeLine) return null;
+  return (
+    <View style={panelStyles.panelRow}>
+      <Text style={panelStyles.panelLabel}>Address</Text>
+      {address && <Text style={panelStyles.panelValue}>{address}</Text>}
+      {placeLine && <Text style={panelStyles.panelValue}>{placeLine}</Text>}
+    </View>
+  );
 }
 
 export function TrialSection({ gym }: { gym: GymDetails }) {
