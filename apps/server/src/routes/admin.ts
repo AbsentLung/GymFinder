@@ -1,7 +1,7 @@
 // Admin review queue for gym_changes, plus role promotion.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
-import { and, asc, eq, gt, sql } from "drizzle-orm"
+import { and, desc, eq, lt, sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, users } from "../db/schema.js"
 import { requireAdmin } from "../auth-guard.js"
@@ -60,16 +60,18 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const { reviewStatus, decidedBy, cursor } = request.query
+      // Newest first - a just-submitted change should never need paging
+      // through the whole decided backlog to find.
       const conditions = [
         ...(reviewStatus ? [eq(gymChanges.reviewStatus, reviewStatus)] : []),
         ...(decidedBy ? [eq(gymChanges.decidedBy, decidedBy)] : []),
-        ...(cursor ? [gt(gymChanges.id, cursor)] : []),
+        ...(cursor ? [lt(gymChanges.id, cursor)] : []),
       ]
       const rows = await db
         .select()
         .from(gymChanges)
         .where(conditions.length ? and(...conditions) : undefined)
-        .orderBy(asc(gymChanges.id))
+        .orderBy(desc(gymChanges.id))
         .limit(20)
 
       const items = await Promise.all(
