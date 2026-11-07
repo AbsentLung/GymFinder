@@ -196,7 +196,7 @@ export const gymPrices = pgTable(
     uniqueIndex("gym_prices_gym_kind_verified_unique").on(table.gymId, table.kind, table.isVerified),
     check(
       "gym_prices_source_kind_check",
-      sql`${table.sourceKind} IN ('gym_website', 'price_menu', 'user', 'review', 'chat')`
+      sql`${table.sourceKind} IN ('gym_website', 'price_menu', 'user', 'review', 'chat', 'sweep_research')`
     ),
     check("gym_prices_verified_by_check", sql`${table.verifiedBy} IN ('bot', 'admin')`),
   ]
