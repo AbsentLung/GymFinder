@@ -28,7 +28,6 @@ interface AdminChange {
     hasTrial: boolean | null;
     status: string;
   } | null;
-  locationLabel: string | null;
   evidence: { reason?: string; sourceUrl?: string; foundAmount?: number; foundCurrency?: string } | null;
   reviewStatus: 'pending_bot' | 'awaiting_admin' | 'approved' | 'rejected';
   decidedBy: 'bot' | 'admin' | null;
@@ -257,7 +256,6 @@ export default function AdminScreen() {
             {coords && (
               <Text style={styles.rowCurrent}>
                 Coordinates: {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
-                {c.locationLabel ? ` — ${c.locationLabel}` : ''}
               </Text>
             )}
             {c.evidence?.reason && <Text style={styles.rowDescription}>Bot/admin note: “{c.evidence.reason}”</Text>}
