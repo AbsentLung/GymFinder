@@ -1,27 +1,27 @@
-// Location names end to end (LOCATION_NAMES.md), against the fixture areas in
-// scripts/fixtures/areas.geojson. Runs once per MODE: pg-boss (demo) and BullMQ (scale).
+// Location names end to end (LOCATION_NAMES.md), against the fixture regions in
+// scripts/fixtures/regions.geojson. Runs once per MODE: pg-boss (demo) and BullMQ (scale).
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 import { sql } from "drizzle-orm"
 import type { FastifyInstance } from "fastify"
 import { db, pool } from "../src/db/index.js"
-import { MODE } from "../src/config.js"
+import { MODE, config } from "../src/config.js"
 import { queue } from "../src/queue/index.js"
 import { upsertGym } from "../src/jobs/gym-upsert.js"
 import {
-  AREA_BACKFILL_QUEUE,
-  GYM_AREA_PHOTON_QUEUE,
-  GYM_AREA_QUEUE,
-  processAreaBackfill,
-  processGymArea,
-  processGymAreaPhoton,
-} from "../src/jobs/gym-area.js"
+  REGION_BACKFILL_QUEUE,
+  GYM_REGION_PHOTON_QUEUE,
+  GYM_REGION_QUEUE,
+  processRegionBackfill,
+  processGymRegion,
+  processGymRegionPhoton,
+} from "../src/jobs/gym-region.js"
 import { buildApp } from "../src/api.js"
-import { config } from "../src/config.js"
 
 const UBUD = { lat: -8.51, lng: 115.27 }
-const BADUNG = { lat: -8.7, lng: 115.1 }
-const WAN_CHAI = { lat: 22.275, lng: 114.18 }
-const SEA_PHOTON_OK = { lat: -10.5, lng: 118.0 }
+const SURABAYA = { lat: -7.25, lng: 112.75 }
+const HONG_KONG = { lat: 22.3, lng: 114.17 }
+const SEA_PHOTON_BALI = { lat: -10.5, lng: 118.0 }
+const SEA_PHOTON_UNKNOWN_STATE = { lat: -12.0, lng: 130.0 }
 const SEA_PHOTON_DOWN = { lat: -11.0, lng: 119.0 }
 
 // Photon is stubbed: fixed answers by latitude, a 503 for the "down" point.
@@ -34,7 +34,8 @@ function stubPhoton() {
     photonCalls.push(url)
     const lat = Number(new URL(url).searchParams.get("lat"))
     if (lat === SEA_PHOTON_DOWN.lat) return new Response("unavailable", { status: 503 })
-    const properties = { countrycode: "ID", state: "Bali", county: "Gianyar", city: "Ubud" }
+    const properties =
+      lat === SEA_PHOTON_UNKNOWN_STATE.lat ? { countrycode: "AU", state: "Nowhere State" } : { countrycode: "ID", state: "Bali" }
     return new Response(JSON.stringify({ features: [{ properties }] }), { headers: { "content-type": "application/json" } })
   })
 }
@@ -57,22 +58,28 @@ async function waitFor<T>(read: () => Promise<T>, done: (value: T) => boolean, t
 }
 
 async function gymRow(gymId: number) {
-  const r = await db.execute<{ area_name: string | null; country_code: string | null; area_id: number | null }>(sql`
-    SELECT a.name AS area_name, g.country_code, g.area_id FROM gyms g LEFT JOIN areas a ON a.id = g.area_id WHERE g.id = ${gymId}
+  const r = await db.execute<{ region_name: string | null; country_code: string | null; region_id: number | null }>(sql`
+    SELECT r.name AS region_name, g.country_code, g.region_id FROM gyms g LEFT JOIN regions r ON r.id = g.region_id WHERE g.id = ${gymId}
   `)
   return r.rows[0]
 }
 
-const areaFilled = (row: { area_name: string | null } | undefined) => Boolean(row?.area_name)
+const regionFilled = (row: { region_name: string | null } | undefined) => Boolean(row?.region_name)
+
+async function placeOf(gymId: number) {
+  const res = await app.inject({ method: "GET", url: `/v1/gyms/${gymId}` })
+  expect(res.statusCode).toBe(200)
+  return res.json().place
+}
 
 let app: FastifyInstance
 
 beforeAll(async () => {
   stubPhoton()
   await queue.start()
-  await queue.process<{ gymId: number }>(GYM_AREA_QUEUE, processGymArea, { concurrency: 4 })
-  await queue.process<{ gymId: number }>(GYM_AREA_PHOTON_QUEUE, processGymAreaPhoton)
-  await queue.process<{ afterId: number }>(AREA_BACKFILL_QUEUE, processAreaBackfill)
+  await queue.process<{ gymId: number }>(GYM_REGION_QUEUE, processGymRegion, { concurrency: 4 })
+  await queue.process<{ gymId: number }>(GYM_REGION_PHOTON_QUEUE, processGymRegionPhoton)
+  await queue.process<{ afterId: number }>(REGION_BACKFILL_QUEUE, processRegionBackfill)
   app = await buildApp()
 })
 
@@ -83,50 +90,37 @@ afterAll(async () => {
   vi.unstubAllGlobals()
 })
 
-describe(`gym areas (MODE=${MODE})`, () => {
-  it("fills the deepest containing area and keeps the OSM postcode", async () => {
+describe(`gym regions (MODE=${MODE})`, () => {
+  it("fills the containing region and keeps the OSM postcode", async () => {
     const gymId = await addOsmGym("Ubud Fitness", UBUD, "80571")
-    const row = await waitFor(() => gymRow(gymId), areaFilled)
-    expect(row.area_name).toBe("Ubud")
+    const row = await waitFor(() => gymRow(gymId), regionFilled)
+    expect(row.region_name).toBe("Bali")
     expect(row.country_code).toBe("ID")
-
-    const res = await app.inject({ method: "GET", url: `/v1/gyms/${gymId}` })
-    expect(res.statusCode).toBe(200)
-    expect(res.json().place).toEqual({
-      city: "Ubud",
-      county: "Gianyar",
-      region: "Bali",
-      country: "Indonesia",
-      countryCode: "ID",
-      postcode: "80571",
-    })
+    expect(await placeOf(gymId)).toEqual({ region: "Bali", country: "Indonesia", countryCode: "ID", postcode: "80571" })
   })
 
-  it("stops at the county where there is no city polygon", async () => {
-    const gymId = await addOsmGym("Badung Gym", BADUNG)
-    const row = await waitFor(() => gymRow(gymId), areaFilled)
-    expect(row.area_name).toBe("Badung")
-    const place = (await app.inject({ method: "GET", url: `/v1/gyms/${gymId}` })).json().place
-    expect(place).toMatchObject({ city: null, county: "Badung", region: "Bali", country: "Indonesia" })
-  })
-
-  it("puts a gym in a promoted territory under its own country code", async () => {
-    const gymId = await addOsmGym("Wan Chai Gym", WAN_CHAI)
-    const row = await waitFor(() => gymRow(gymId), areaFilled)
-    expect(row.area_name).toBe("Wan Chai")
+  it("gives a territory region its own country code", async () => {
+    const gymId = await addOsmGym("Hong Kong Gym", HONG_KONG)
+    const row = await waitFor(() => gymRow(gymId), regionFilled)
     expect(row.country_code).toBe("HK")
-    const place = (await app.inject({ method: "GET", url: `/v1/gyms/${gymId}` })).json().place
-    expect(place).toMatchObject({ county: "Wan Chai", region: null, countryCode: "HK", country: "Hong Kong SAR China" })
+    expect(await placeOf(gymId)).toMatchObject({ countryCode: "HK", country: "Hong Kong SAR China" })
   })
 
-  it("falls back to Photon outside every polygon and maps onto existing areas", async () => {
-    const gymId = await addOsmGym("Island Gym", SEA_PHOTON_OK)
-    const row = await waitFor(() => gymRow(gymId), areaFilled)
-    expect(row.area_name).toBe("Ubud")
+  it("falls back to Photon outside every polygon and maps the state onto an existing region", async () => {
+    const gymId = await addOsmGym("Island Gym", SEA_PHOTON_BALI)
+    const row = await waitFor(() => gymRow(gymId), regionFilled)
+    expect(row.region_name).toBe("Bali")
     expect(row.country_code).toBe("ID")
   })
 
-  it("leaves the gym saved with no area when Photon is down", async () => {
+  it("keeps Photon's country when its state matches no region", async () => {
+    const gymId = await addOsmGym("Outback Gym", SEA_PHOTON_UNKNOWN_STATE)
+    const row = await waitFor(() => gymRow(gymId), (r) => r?.country_code === "AU")
+    expect(row.region_id).toBeNull()
+    expect(await placeOf(gymId)).toEqual({ region: null, country: "Australia", countryCode: "AU", postcode: null })
+  })
+
+  it("leaves the gym saved with no region when Photon is down", async () => {
     const before = photonCalls.length
     const gymId = await addOsmGym("Remote Gym", SEA_PHOTON_DOWN)
     await waitFor(
@@ -135,27 +129,27 @@ describe(`gym areas (MODE=${MODE})`, () => {
     )
     const row = await gymRow(gymId)
     expect(row).toBeDefined()
-    expect(row.area_id).toBeNull()
+    expect(row.region_id).toBeNull()
   })
 
-  it("refills the area when a refresh moves the gym", async () => {
+  it("refills the region when a refresh moves the gym", async () => {
     const externalId = `int-${MODE}-move`
     const first = await upsertGym("osm", { externalId, name: "Moving Gym", ...UBUD })
     const gymId = first!.gymId
-    await waitFor(() => gymRow(gymId), (r) => r?.area_name === "Ubud")
-    await upsertGym("osm", { externalId, name: "Moving Gym", ...BADUNG })
-    const row = await waitFor(() => gymRow(gymId), (r) => r?.area_name === "Badung")
-    expect(row.area_name).toBe("Badung")
+    await waitFor(() => gymRow(gymId), (r) => r?.region_name === "Bali")
+    await upsertGym("osm", { externalId, name: "Moving Gym", ...SURABAYA })
+    const row = await waitFor(() => gymRow(gymId), (r) => r?.region_name === "East Java")
+    expect(row.region_name).toBe("East Java")
   })
 
-  it("backfills existing gyms that were written without an area", async () => {
+  it("backfills existing gyms that were written without a region", async () => {
     const inserted = await db.execute<{ id: number }>(sql`
       INSERT INTO gyms (name, location) VALUES ('Old Gym', ST_SetSRID(ST_MakePoint(${UBUD.lng}, ${UBUD.lat}), 4326)) RETURNING id
     `)
     const gymId = Number(inserted.rows[0].id)
-    await queue.add(AREA_BACKFILL_QUEUE, { afterId: 0 }, { jobId: `area-backfill-test-${MODE}` })
-    const row = await waitFor(() => gymRow(gymId), areaFilled)
-    expect(row.area_name).toBe("Ubud")
+    await queue.add(REGION_BACKFILL_QUEUE, { afterId: 0 }, { jobId: `region-backfill-test-${MODE}` })
+    const row = await waitFor(() => gymRow(gymId), regionFilled)
+    expect(row.region_name).toBe("Bali")
   })
 
   it("returns places in My requests and the admin list, including an add_gym with no gym yet", async () => {
@@ -184,19 +178,19 @@ describe(`gym areas (MODE=${MODE})`, () => {
     expect(item.gymName).toBe("Proposed Ubud Gym")
     const change = item.changes[0]
     expect(change.gymId).toBeNull()
-    expect(change.place).toMatchObject({ city: "Ubud", region: "Bali", country: "Indonesia" })
+    expect(change.place).toMatchObject({ region: "Bali", country: "Indonesia" })
 
     const adminList = await app.inject({ method: "GET", url: "/v1/admin/changes", headers: { cookie } })
     expect(adminList.statusCode).toBe(200)
     const adminRow = adminList.json().items.find((i: { id: string }) => i.id === change.id)
-    expect(adminRow.place).toMatchObject({ city: "Ubud", country: "Indonesia" })
+    expect(adminRow.place).toMatchObject({ region: "Bali", country: "Indonesia" })
     expect(adminRow).not.toHaveProperty("locationLabel")
 
-    // Approving creates the gym (bot-review.ts path), which then gets its area from the job.
+    // Approving creates the gym (bot-review.ts path), which then gets its region from the job.
     const approved = await app.inject({ method: "POST", url: `/v1/admin/changes/${change.id}/approve`, headers: { cookie } })
     expect(approved.statusCode).toBe(200)
     const newGym = await db.execute<{ id: number }>(sql`SELECT id FROM gyms WHERE name = 'Proposed Ubud Gym' ORDER BY id DESC LIMIT 1`)
-    const row = await waitFor(() => gymRow(Number(newGym.rows[0].id)), areaFilled)
-    expect(row.area_name).toBe("Ubud")
+    const row = await waitFor(() => gymRow(Number(newGym.rows[0].id)), regionFilled)
+    expect(row.region_name).toBe("Bali")
   })
 })

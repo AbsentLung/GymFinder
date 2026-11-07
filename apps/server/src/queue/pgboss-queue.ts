@@ -32,9 +32,9 @@ export class PgBossQueue implements QueueInterface {
     "bot-review",
     "sweep",
     "research-gym",
-    "gym-area",
-    "gym-area-photon",
-    "area-backfill",
+    "gym-region",
+    "gym-region-photon",
+    "region-backfill",
   ])
 
   private async ensureQueue(name: string) {

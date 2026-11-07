@@ -12,7 +12,7 @@ import { requireDescription, GYM_CATEGORIES, isFetchRowFresh, geohash5TilesCover
 import { NON_PRICE_FIELDS, createGymChange } from "../jobs/bot-review.js"
 import type { ProposedChange } from "../jobs/bot-review.js"
 import { checkRateLimit } from "../rate-limit.js"
-import { placeForChange } from "../area-queries.js"
+import { placeForChange } from "../region-queries.js"
 
 const BOT_REVIEW_DEADLINE_MS = 10 * 60 * 1000
 const SWEEP_DEADLINE_MS = 60 * 60 * 1000

@@ -6,7 +6,7 @@ import { db } from "../db/index.js"
 import { gymChanges, users } from "../db/schema.js"
 import { requireAdmin } from "../auth-guard.js"
 import { applyDecision } from "../jobs/bot-review.js"
-import { placeForChange } from "../area-queries.js"
+import { placeForChange } from "../region-queries.js"
 
 interface CurrentGymRow {
   [key: string]: unknown

@@ -3,8 +3,8 @@
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { isDuplicateMatch } from "../lib.js"
-import { findDeepestAreaAt } from "../area-queries.js"
-import { enqueueGymArea } from "./gym-area.js"
+import { findRegionAt } from "../region-queries.js"
+import { enqueueGymRegion } from "./gym-region.js"
 import type { RawGym } from "../interfaces/source.js"
 
 export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: number; isNew: boolean } | null> {
@@ -32,7 +32,7 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
       WHERE id = ${gymId}
       RETURNING NOT ST_Equals(gyms.location, (SELECT location FROM before)) AS moved
     `)
-    if (updated.rows[0]?.moved) await enqueueGymArea(gymId)
+    if (updated.rows[0]?.moved) await enqueueGymRegion(gymId)
   } else {
     // A source can map the same real gym under two element ids - plain
     // external-id matching can't catch that, so check name+proximity too.
@@ -59,8 +59,8 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
         ON CONFLICT (source, external_id) DO NOTHING
       `)
     } else {
-      // Set now so price currency is right before the gym-area job runs.
-      const countryCode = (await findDeepestAreaAt(g.lat, g.lng))?.countryCode ?? null
+      // Set now so price currency is right before the gym-region job runs.
+      const countryCode = (await findRegionAt(g.lat, g.lng))?.countryCode ?? null
       const inserted = await db.execute<{ id: number }>(sql`
         INSERT INTO gyms (name, location, address, description, postcode, country_code)
         VALUES (${g.name}, ${point}, ${g.address ?? null}, ${g.description ?? null}, ${g.postcode ?? null}, ${countryCode})
@@ -68,7 +68,7 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
       `)
       gymId = inserted.rows[0].id
       isNew = true
-      await enqueueGymArea(gymId)
+      await enqueueGymRegion(gymId)
       await db.execute(sql`
         INSERT INTO gym_source_refs (gym_id, source, external_id) VALUES (${gymId}, ${source}, ${g.externalId})
         ON CONFLICT (source, external_id) DO NOTHING

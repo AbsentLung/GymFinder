@@ -43,8 +43,8 @@
     "db:migrate": "drizzle-kit migrate",
     "migrate-demo-data": "tsx scripts/migrate-demo-data.ts",
     "seed": "tsx scripts/seed.ts",
-    "seed:areas": "tsx scripts/seed-areas.ts",
-    "backfill:areas": "tsx scripts/backfill-areas.ts",
-    "test:integration": "vitest run --config vitest.integration.config.ts --mode demo && vitest run --config vitest.integration.config.ts --mode scale"
+    "test:integration": "vitest run --config vitest.integration.config.ts --mode demo && vitest run --config vitest.integration.config.ts --mode scale",
+    "seed:regions": "tsx scripts/seed-regions.ts",
+    "backfill:regions": "tsx scripts/backfill-regions.ts"
   }
 }

@@ -1,7 +1,7 @@
 // Server-side decision input - Photon only, no Nominatim fallback here.
 // GeocoderUnavailableError (outage) stays distinct from a plain null
 // (Photon answered, found nothing - FR-26's "likely in the sea" signal).
-import { photonPlaceFromResponse, type PhotonPlace } from "./areas.js"
+import { photonPlaceFromResponse, type PhotonPlace } from "./regions.js"
 
 export class GeocoderUnavailableError extends Error {}
 
@@ -22,7 +22,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
   return p ? [p.city || p.district, p.state, p.country].filter(Boolean).join(", ") : null
 }
 
-// Structured reverse lookup for the gym-area-photon job. Throws on an
+// Structured reverse lookup for the gym-region-photon job. Throws on an
 // outage so the queue retries; null means Photon found nothing.
 export async function reverseGeocodePlace(lat: number, lng: number): Promise<PhotonPlace | null> {
   let res: Response

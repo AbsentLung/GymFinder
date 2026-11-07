@@ -1,5 +1,5 @@
 {
-  "id": "003177eb-1326-4ed0-aa31-84ad12d303d7",
+  "id": "19a7c97a-8a5b-42a0-a21d-8a4a48ecb271",
   "prevId": "afe9b1bb-8745-4e1b-b72d-bc4a4ee89fff",
   "version": "7",
   "dialect": "postgresql",
@@ -146,126 +146,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.areas": {
-      "name": "areas",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigserial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "level": {
-          "name": "level",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "parent_id": {
-          "name": "parent_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "country_code": {
-          "name": "country_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "geom": {
-          "name": "geom",
-          "type": "geometry(MultiPolygon, 4326)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_ref": {
-          "name": "source_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "areas_geom_gist": {
-          "name": "areas_geom_gist",
-          "columns": [
-            {
-              "expression": "geom",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gist",
-          "with": {}
-        },
-        "areas_parent_idx": {
-          "name": "areas_parent_idx",
-          "columns": [
-            {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "areas_source_ref_unique": {
-          "name": "areas_source_ref_unique",
-          "columns": [
-            {
-              "expression": "source_ref",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "areas_parent_id_areas_id_fk": {
-          "name": "areas_parent_id_areas_id_fk",
-          "tableFrom": "areas",
-          "tableTo": "areas",
-          "columnsFrom": [
-            "parent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "areas_level_check": {
-          "name": "areas_level_check",
-          "value": "\"areas\".\"level\" IN ('country', 'region', 'county', 'city')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.fx_rates": {
@@ -734,8 +614,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "area_id": {
-          "name": "area_id",
+        "region_id": {
+          "name": "region_id",
           "type": "bigint",
           "primaryKey": false,
           "notNull": false
@@ -853,11 +733,11 @@
           "method": "gin",
           "with": {}
         },
-        "gyms_area_idx": {
-          "name": "gyms_area_idx",
+        "gyms_region_idx": {
+          "name": "gyms_region_idx",
           "columns": [
             {
-              "expression": "area_id",
+              "expression": "region_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -870,12 +750,12 @@
         }
       },
       "foreignKeys": {
-        "gyms_area_id_areas_id_fk": {
-          "name": "gyms_area_id_areas_id_fk",
+        "gyms_region_id_regions_id_fk": {
+          "name": "gyms_region_id_regions_id_fk",
           "tableFrom": "gyms",
-          "tableTo": "areas",
+          "tableTo": "regions",
           "columnsFrom": [
-            "area_id"
+            "region_id"
           ],
           "columnsTo": [
             "id"
@@ -980,6 +860,80 @@
           "value": "\"push_tokens\".\"platform\" IN ('ios', 'android', 'web')"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.regions": {
+      "name": "regions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "country_code": {
+          "name": "country_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "geom": {
+          "name": "geom",
+          "type": "geometry(MultiPolygon, 4326)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_ref": {
+          "name": "source_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "regions_geom_gist": {
+          "name": "regions_geom_gist",
+          "columns": [
+            {
+              "expression": "geom",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gist",
+          "with": {}
+        },
+        "regions_source_ref_unique": {
+          "name": "regions_source_ref_unique",
+          "columns": [
+            {
+              "expression": "source_ref",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.requests": {
