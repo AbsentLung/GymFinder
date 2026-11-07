@@ -17,6 +17,7 @@ import {
   index,
   uniqueIndex,
   check,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 
 // Drizzle has no built-in PostGIS type - customType escape hatch.
@@ -33,6 +34,38 @@ const point = customType<{ data: { lat: number; lng: number }; driverData: strin
     return value as unknown as { lat: number; lng: number }
   },
 })
+
+// Only ever written and read through raw SQL (seed script, ST_Contains).
+const multiPolygon = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "geometry(MultiPolygon, 4326)"
+  },
+})
+
+export const AREA_LEVELS = ["country", "region", "county", "city"] as const
+export type AreaLevel = (typeof AREA_LEVELS)[number]
+
+// Boundary polygons (LOCATION_NAMES.md). Named "areas", not "admin_*",
+// so it never reads like the admin role.
+export const areas = pgTable(
+  "areas",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    name: text("name").notNull(),
+    level: text("level").$type<AreaLevel>().notNull(),
+    parentId: bigint("parent_id", { mode: "number" }).references((): AnyPgColumn => areas.id, { onDelete: "set null" }),
+    countryCode: text("country_code").notNull(),
+    geom: multiPolygon("geom").notNull(),
+    // e.g. "geoBoundaries:<shapeID>" - lets the seed upsert, keeping ids stable for gyms.area_id.
+    sourceRef: text("source_ref").notNull(),
+  },
+  (table) => [
+    index("areas_geom_gist").using("gist", table.geom),
+    index("areas_parent_idx").on(table.parentId),
+    uniqueIndex("areas_source_ref_unique").on(table.sourceRef),
+    check("areas_level_check", sql`${table.level} IN ('country', 'region', 'county', 'city')`),
+  ]
+)
 
 // Remapped from Better Auth's own "user" table name via auth.ts's
 // modelName option, to keep this app's bigint-id scheme everywhere.
@@ -141,6 +174,11 @@ export const gyms = pgTable(
     // ISO 3166-1 alpha-2, from reverse-geocoding at creation. Drives
     // which local currency a USD-stored price displays in.
     countryCode: text("country_code"),
+    // Most specific area containing the gym; names are read by walking
+    // areas.parent_id, never copied here (LOCATION_NAMES.md).
+    areaId: bigint("area_id", { mode: "number" }).references(() => areas.id, { onDelete: "set null" }),
+    // Free text - formats vary and many countries have none.
+    postcode: text("postcode"),
     acceptsDropIn: boolean("accepts_drop_in"),
     hasTrial: boolean("has_trial"),
     // Opening hours, amenities, website, trial details, etc.
@@ -161,6 +199,7 @@ export const gyms = pgTable(
     index("gyms_geohash4_idx").on(table.geohash4),
     index("gyms_geohash5_idx").on(table.geohash5),
     index("gyms_categories_gin").using("gin", table.categories),
+    index("gyms_area_idx").on(table.areaId),
     check("gyms_status_check", sql`${table.status} IN ('active', 'closed', 'hidden')`),
   ]
 )
