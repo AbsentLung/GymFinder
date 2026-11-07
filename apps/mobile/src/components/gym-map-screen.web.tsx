@@ -308,7 +308,7 @@ export default function MapScreen() {
   const allGymsRef = useRef<Gym[] | null>(null);
   allGymsRef.current = allGyms;
 
-  const loadTiles = () => {
+  const loadTiles = (opts?: { suppressNudge?: boolean }) => {
     if (!mapBounds || zoom < FILTERS_VISIBLE_AT_ZOOM) return;
     const tiles = geohash4TilesCoveringBbox({
       minLat: mapBounds.getSouth(),
@@ -332,8 +332,9 @@ export default function MapScreen() {
           })
           .then((data) => {
             mergeFreshGyms(data.gyms);
-            // fetchedAt === null means this tile's never been scanned.
-            if (data.fetchedAt === null) setShowScanNudge(true);
+            // A sweep can't cover a whole tile in one click (capped
+            // cell count) - don't re-nag right after one just ran.
+            if (data.fetchedAt === null && !opts?.suppressNudge) setShowScanNudge(true);
             return true;
           })
           .catch((e) => {
@@ -400,7 +401,7 @@ export default function MapScreen() {
       } else {
         setFindMoreMessage(totalNew > 0 ? `Found ${totalNew} new gym(s).` : 'No new gyms found here.');
         cells.forEach((cell) => fetchedTilesRef.current.delete(cell.slice(0, 4)));
-        loadTiles();
+        loadTiles({ suppressNudge: true });
       }
     } finally {
       setFindingMore(false);
