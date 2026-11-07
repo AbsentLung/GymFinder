@@ -10,6 +10,7 @@ This page is the short overview. Each section links to the detailed doc where th
 | [DESIGN_DISCUSSION.md](./DESIGN_DISCUSSION.md) | Architecture options, database, caching and queues |
 | [STACK_AND_SCHEMA.md](./STACK_AND_SCHEMA.md) | Tools, AWS hosting, database schema |
 | [API.md](./API.md) | REST endpoints, the contract the app and server build against |
+| [LOCATION_NAMES.md](./LOCATION_NAMES.md) | Stored city / region / country for every gym: `areas` boundaries, fill-on-write jobs |
 | [CLAUDE.md](./CLAUDE.md) | The same decisions as rules for Claude sessions |
 
 ---
