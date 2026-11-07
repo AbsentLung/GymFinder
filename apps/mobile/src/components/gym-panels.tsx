@@ -71,6 +71,7 @@ export interface GymRequest {
   deadline: string;
   result: Record<string, unknown> | null;
   failureReason: string | null;
+  gymName: string | null;
   changes: { id: string; reviewStatus: 'pending_bot' | 'awaiting_admin' | 'approved' | 'rejected'; reason: string | null }[];
 }
 
@@ -414,9 +415,9 @@ export function ChatSection({ gym }: { gym: Pick<Gym, 'id'> }) {
   );
 }
 
-// Deliberately minimal: only name is collected here. Address/description
-// get filled in by the bot from Google's listing; everything else
-// arrives later through an edit request.
+// Only name is required - the bot fills in anything left blank from
+// Google's listing, but a submitter who already knows more can give it
+// upfront instead of waiting for an edit request later.
 export function SubmitGymForm({
   location,
   onSubmitted,
@@ -429,6 +430,14 @@ export function SubmitGymForm({
   const router = useRouter();
   const { user, authHeaders } = useAuth();
   const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [description, setDescription] = useState('');
+  const [categories, setCategories] = useState<string[]>([]);
+  const [acceptsDropIn, setAcceptsDropIn] = useState<boolean | null>(null);
+  const [hasTrial, setHasTrial] = useState<boolean | null>(null);
+  const [dayPassPrice, setDayPassPrice] = useState('');
+  const [weekPassPrice, setWeekPassPrice] = useState('');
+  const [monthPassPrice, setMonthPassPrice] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ approved: boolean; reason: string | null; pending: boolean } | null>(null);
   const mountedRef = useRef(true);
@@ -451,11 +460,30 @@ export function SubmitGymForm({
     if (!name.trim() || submitting) return;
     setSubmitting(true);
     try {
+      const prices = ([
+        { priceKind: 'day_pass' as const, value: dayPassPrice },
+        { priceKind: 'week_pass' as const, value: weekPassPrice },
+        { priceKind: 'month_pass' as const, value: monthPassPrice },
+      ])
+        .filter((p) => p.value.trim().length > 0)
+        .map((p) => ({ priceKind: p.priceKind, amountMinor: Math.round(parseFloat(p.value) * 100), currency: 'USD', sourceKind: 'user' as const }))
+        .filter((p) => Number.isFinite(p.amountMinor) && p.amountMinor > 0);
+
       const res = await fetch(`${API_BASE_URL}/v1/gyms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         credentials: 'include',
-        body: JSON.stringify({ name, lat: location.lat, lng: location.lng, categories: [] }),
+        body: JSON.stringify({
+          name,
+          lat: location.lat,
+          lng: location.lng,
+          categories,
+          ...(address.trim() ? { address: address.trim() } : {}),
+          ...(description.trim() ? { description: description.trim() } : {}),
+          ...(acceptsDropIn != null ? { acceptsDropIn } : {}),
+          ...(hasTrial != null ? { hasTrial } : {}),
+          prices,
+        }),
       });
       if (!res.ok) throw new Error(`Submit gym failed: ${res.status}`);
       const created: GymRequest = await res.json();
@@ -514,6 +542,85 @@ export function SubmitGymForm({
       <View style={panelStyles.panelRow}>
         <Text style={panelStyles.panelLabel}>Gym name</Text>
         <TextInput style={panelStyles.input} value={name} onChangeText={setName} />
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Address (optional)</Text>
+        <TextInput style={panelStyles.input} value={address} onChangeText={setAddress} />
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Description (optional)</Text>
+        <TextInput
+          style={[panelStyles.input, panelStyles.textarea]}
+          value={description}
+          onChangeText={setDescription}
+          multiline
+          numberOfLines={3}
+        />
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Categories (optional)</Text>
+        <View style={panelStyles.editFieldPicker}>
+          {GYM_CATEGORIES.map((cat) => {
+            const active = categories.includes(cat);
+            return (
+              <Pressable
+                key={cat}
+                style={[panelStyles.editFieldChip, active && panelStyles.editFieldChipActive]}
+                onPress={() => setCategories((prev) => (active ? prev.filter((c) => c !== cat) : [...prev, cat]))}
+              >
+                <Text style={[panelStyles.editFieldChipText, active && panelStyles.editFieldChipTextActive]}>{cat}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Accepts drop-ins (optional)</Text>
+        <View style={panelStyles.editFieldPicker}>
+          {([
+            { label: 'Unknown', val: null },
+            { label: 'Yes', val: true },
+            { label: 'No', val: false },
+          ] as const).map((opt) => (
+            <Pressable
+              key={opt.label}
+              style={[panelStyles.editFieldChip, acceptsDropIn === opt.val && panelStyles.editFieldChipActive]}
+              onPress={() => setAcceptsDropIn(opt.val)}
+            >
+              <Text style={[panelStyles.editFieldChipText, acceptsDropIn === opt.val && panelStyles.editFieldChipTextActive]}>{opt.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Offers a trial (optional)</Text>
+        <View style={panelStyles.editFieldPicker}>
+          {([
+            { label: 'Unknown', val: null },
+            { label: 'Yes', val: true },
+            { label: 'No', val: false },
+          ] as const).map((opt) => (
+            <Pressable
+              key={opt.label}
+              style={[panelStyles.editFieldChip, hasTrial === opt.val && panelStyles.editFieldChipActive]}
+              onPress={() => setHasTrial(opt.val)}
+            >
+              <Text style={[panelStyles.editFieldChipText, hasTrial === opt.val && panelStyles.editFieldChipTextActive]}>{opt.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Day pass price, USD (optional)</Text>
+        <TextInput style={panelStyles.input} value={dayPassPrice} onChangeText={setDayPassPrice} keyboardType="numeric" placeholder="e.g. 12.00" placeholderTextColor={PLACEHOLDER_COLOR} />
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Week pass price, USD (optional)</Text>
+        <TextInput style={panelStyles.input} value={weekPassPrice} onChangeText={setWeekPassPrice} keyboardType="numeric" placeholder="e.g. 60.00" placeholderTextColor={PLACEHOLDER_COLOR} />
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Month pass price, USD (optional)</Text>
+        <TextInput style={panelStyles.input} value={monthPassPrice} onChangeText={setMonthPassPrice} keyboardType="numeric" placeholder="e.g. 150.00" placeholderTextColor={PLACEHOLDER_COLOR} />
       </View>
       <Pressable style={[panelStyles.submitButton, (submitting || !name.trim()) && panelStyles.submitButtonDisabled]} onPress={submit}>
         <Text style={panelStyles.submitButtonText}>{submitting ? 'Submitting…' : 'Submit gym'}</Text>
