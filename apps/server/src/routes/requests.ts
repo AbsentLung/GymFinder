@@ -7,8 +7,8 @@ import { and, desc, eq, lt, sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, gyms, requests, tileFetches } from "../db/schema.js"
 import { queue } from "../queue/index.js"
-import { requireUser } from "../auth-guard.js"
-import { requireDescription, GYM_CATEGORIES, isFetchRowFresh } from "../lib.js"
+import { requireUser, getSessionUser } from "../auth-guard.js"
+import { requireDescription, GYM_CATEGORIES, isFetchRowFresh, geohash5TilesCoveringBbox } from "../lib.js"
 import { NON_PRICE_FIELDS, createGymChange } from "../jobs/bot-review.js"
 import type { ProposedChange } from "../jobs/bot-review.js"
 import { checkRateLimit } from "../rate-limit.js"
@@ -21,8 +21,13 @@ const GEOHASH5_PATTERN = /^[0-9b-hj-km-np-z]{5}$/
 // A sweep launches a real browser and scrapes Google - tighter than a plain read.
 const SWEEP_RATE_LIMIT_MAX = 5
 const SWEEP_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
+// A viewport can cover dozens of cells - cap how many one bbox call fans out to.
+const MAX_BBOX_CELLS = 20
 
-const sweepBodySchema = z.object({ geohash: z.string().regex(GEOHASH5_PATTERN, "must be a 5-character geohash") })
+const sweepBodySchema = z.union([
+  z.object({ geohash: z.string().regex(GEOHASH5_PATTERN, "must be a 5-character geohash") }),
+  z.object({ bbox: z.object({ minLat: z.number(), maxLat: z.number(), minLng: z.number(), maxLng: z.number() }) }),
+])
 
 const priceProposalSchema = z.object({
   priceKind: z.enum(["day_pass", "week_pass", "month_pass"]),
@@ -90,6 +95,56 @@ async function serializeRequest(requestId: number) {
   }
 }
 
+// One geohash5 cell's worth of sweep - reused by both the single-cell
+// and bbox-fan-out paths, so each cell still gets its own request/job.
+async function sweepOneCell(geohash: string, userId: number | null): Promise<{ result: unknown; created: boolean }> {
+  // A recently-swept tile returns the already-completed request -
+  // reuses tile_fetches' own staleness tracking.
+  const [fetchRow] = await db
+    .select()
+    .from(tileFetches)
+    .where(and(eq(tileFetches.geohash, geohash), eq(tileFetches.source, "google_maps")))
+  if (isFetchRowFresh(fetchRow, SWEEP_STALE_MS)) {
+    const [recent] = await db
+      .select()
+      .from(requests)
+      .where(and(eq(requests.kind, "sweep"), sql`${requests.input}->>'geohash' = ${geohash}`))
+      .orderBy(desc(requests.id))
+      .limit(1)
+    if (recent) return { result: await serializeRequest(recent.id), created: false }
+    // No stored request to point at - report from tile_fetches alone.
+    return {
+      created: false,
+      result: {
+        id: null,
+        kind: "sweep",
+        status: "completed",
+        createdAt: fetchRow.lastFetchedAt,
+        deadline: fetchRow.lastFetchedAt,
+        result: { gymsFound: fetchRow.gymsFound ?? 0, gymsNew: 0 },
+        failureReason: null,
+        changes: [],
+      },
+    }
+  }
+
+  // A tile already queued attaches to the existing request row.
+  const [pending] = await db
+    .select()
+    .from(requests)
+    .where(and(eq(requests.kind, "sweep"), eq(requests.status, "pending"), sql`${requests.input}->>'geohash' = ${geohash}`))
+    .limit(1)
+  if (pending) return { result: await serializeRequest(pending.id), created: false }
+
+  const [created] = await db
+    .insert(requests)
+    .values({ userId, kind: "sweep", deadline: new Date(Date.now() + SWEEP_DEADLINE_MS), input: { geohash } })
+    .returning()
+  // "-" not ":" - BullMQ rejects a custom id containing a colon.
+  await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep-${geohash}` })
+  return { result: await serializeRequest(created.id), created: true }
+}
+
 async function createRequest(userId: number, kind: "add_gym" | "update_gym", input: unknown, gymId: number | null, proposed: ProposedChange) {
   const [request] = await db
     .insert(requests)
@@ -138,68 +193,41 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.post(
     "/v1/sweeps",
-    { preHandler: requireUser, schema: { body: sweepBodySchema } },
+    { schema: { body: sweepBodySchema } },
     async (request, reply) => {
-      const { geohash } = request.body
-      const allowed = await checkRateLimit(`sweep:user:${request.sessionUser!.id}`, SWEEP_RATE_LIMIT_MAX, SWEEP_RATE_LIMIT_WINDOW_SECONDS)
+      // FR-15/FR-22: the one request kind that doesn't need an account.
+      // One check per call, not per cell - a bbox can cover dozens.
+      const sessionUser = await getSessionUser(request)
+      const rateLimitKey = `sweep:${sessionUser ? `user:${sessionUser.id}` : `ip:${request.ip}`}`
+      const allowed = await checkRateLimit(rateLimitKey, SWEEP_RATE_LIMIT_MAX, SWEEP_RATE_LIMIT_WINDOW_SECONDS)
       if (!allowed) return reply.status(429).send({ error: "Too many sweeps - try again later" })
 
-      // A recently-swept tile returns 200 with the already-completed
-      // request - reuses tile_fetches' own staleness tracking. Status-
-      // aware: a failed sweep only blocks a retry for a short backoff,
-      // not the full week a real completed sweep does.
-      const [fetchRow] = await db
-        .select()
-        .from(tileFetches)
-        .where(and(eq(tileFetches.geohash, geohash), eq(tileFetches.source, "google_maps")))
-      if (isFetchRowFresh(fetchRow, SWEEP_STALE_MS)) {
-        const [recent] = await db
-          .select()
-          .from(requests)
-          .where(and(eq(requests.kind, "sweep"), sql`${requests.input}->>'geohash' = ${geohash}`))
-          .orderBy(desc(requests.id))
-          .limit(1)
-        if (recent) return serializeRequest(recent.id)
-        // No stored request to point at - report from tile_fetches alone.
-        return {
-          id: null,
-          kind: "sweep",
-          status: "completed",
-          createdAt: fetchRow.lastFetchedAt,
-          deadline: fetchRow.lastFetchedAt,
-          result: { gymsFound: fetchRow.gymsFound ?? 0, gymsNew: 0 },
-          failureReason: null,
-          changes: [],
-        }
+      const geohashes =
+        "geohash" in request.body ? [request.body.geohash] : geohash5TilesCoveringBbox(request.body.bbox).slice(0, MAX_BBOX_CELLS)
+      const cells = await Promise.all(geohashes.map((g) => sweepOneCell(g, sessionUser?.id ?? null)))
+
+      if ("geohash" in request.body) {
+        if (cells[0].created) reply.status(202)
+        return cells[0].result
       }
-
-      // A tile already queued attaches to the existing request row.
-      const [pending] = await db
-        .select()
-        .from(requests)
-        .where(and(eq(requests.kind, "sweep"), eq(requests.status, "pending"), sql`${requests.input}->>'geohash' = ${geohash}`))
-        .limit(1)
-      if (pending) return serializeRequest(pending.id)
-
-      const [created] = await db
-        .insert(requests)
-        .values({ userId: request.sessionUser!.id, kind: "sweep", deadline: new Date(Date.now() + SWEEP_DEADLINE_MS), input: { geohash } })
-        .returning()
-      // "-" not ":" - BullMQ rejects a custom id containing a colon.
-      await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep-${geohash}` })
-      reply.status(202)
-      return serializeRequest(created.id)
+      if (cells.some((c) => c.created)) reply.status(202)
+      return { items: cells.map((c) => c.result) }
     }
   )
 
   app.get(
     "/v1/requests/:id",
-    { preHandler: requireUser, schema: { params: z.object({ id: z.coerce.number().int() }) } },
+    { schema: { params: z.object({ id: z.coerce.number().int() }) } },
     async (request, reply) => {
       const [row] = await db.select().from(requests).where(eq(requests.id, request.params.id))
       if (!row) return reply.status(404).send({ error: "Not found" })
-      if (row.userId !== request.sessionUser!.id && request.sessionUser!.role !== "admin") {
-        return reply.status(403).send({ error: "Not your request" })
+      // A signed-out sweep has no owner - knowing its id is enough (like chat).
+      if (row.userId !== null) {
+        const sessionUser = await getSessionUser(request)
+        if (!sessionUser) return reply.status(401).send({ error: "Sign in required" })
+        if (row.userId !== sessionUser.id && sessionUser.role !== "admin") {
+          return reply.status(403).send({ error: "Not your request" })
+        }
       }
       return serializeRequest(row.id)
     }

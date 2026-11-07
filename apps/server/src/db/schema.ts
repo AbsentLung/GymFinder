@@ -1,10 +1,5 @@
 // Real schema per STACK_AND_SCHEMA.md part 2. The old apps/server/db/*.sql
 // is the vibe-coded demo, kept as reference only.
-//
-// Better Auth's session/account/verification tables are defined below
-// too, pulled forward from Phase 5 - the migration needs account.password
-// to carry over existing bcrypt hashes. Auth wiring itself is still
-// Phase 5; this is schema only.
 
 import { sql, type SQL } from "drizzle-orm"
 import {
@@ -39,10 +34,8 @@ const point = customType<{ data: { lat: number; lng: number }; driverData: strin
   },
 })
 
-// name/emailVerified/image/createdAt/updatedAt are Better Auth's own
-// required columns, confirmed via its CLI generator against this table.
-// Remapped onto `users` (not a separate "user" table) via auth.ts's
-// modelName/generateId options, to keep the bigint-id scheme everywhere.
+// Remapped from Better Auth's own "user" table name via auth.ts's
+// modelName option, to keep this app's bigint-id scheme everywhere.
 export const users = pgTable(
   "users",
   {
@@ -58,10 +51,8 @@ export const users = pgTable(
   (table) => [check("users_role_check", sql`${table.role} IN ('user', 'admin')`)]
 )
 
-// Hand-matched to this file's bigserial/bigint convention rather than
-// Better Auth's own CLI output (int/serial), for one consistent id scheme.
-// Export name must be exactly "session" - Better Auth's adapter looks
-// tables up by export identifier, not SQL table name (confirmed live).
+// Export name must be exactly "session" - Better Auth looks tables up
+// by export identifier, not SQL table name.
 export const session = pgTable(
   "session",
   {
@@ -147,6 +138,9 @@ export const gyms = pgTable(
     // downstream ever read gyms.address/description from the old data.
     address: text("address"),
     description: text("description"),
+    // ISO 3166-1 alpha-2, from reverse-geocoding at creation. Drives
+    // which local currency a USD-stored price displays in.
+    countryCode: text("country_code"),
     acceptsDropIn: boolean("accepts_drop_in"),
     hasTrial: boolean("has_trial"),
     // Opening hours, amenities, website, trial details, etc.
@@ -179,6 +173,8 @@ export const gymPrices = pgTable(
       .notNull()
       .references(() => gyms.id, { onDelete: "cascade" }),
     kind: text("kind").notNull(),
+    // Always USD going forward (Decided by Joey, 2026-11-04) - amountMinor
+    // equals usdCents; local display is converted at read time (lib.ts).
     amountMinor: integer("amount_minor").notNull(),
     currency: text("currency").notNull(),
     usdCents: integer("usd_cents").notNull(),
@@ -225,8 +221,7 @@ export const requests = pgTable(
   "requests",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
-    // Signed-out users can't create a request (FR-15). Nullable with
-    // onDelete: "set null" - deleting a user keeps the request, unlinked.
+    // Null for a signed-out sweep (FR-15, FR-22), or a deleted user.
     userId: bigint("user_id", { mode: "number" }).references(() => users.id, { onDelete: "set null" }),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("pending"),
