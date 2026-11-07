@@ -29,7 +29,7 @@ This page is the short overview. Each section links to the detailed doc where th
 
 ```mermaid
 flowchart LR
-    App([Expo app<br/>Web / Android / iOS]) --> CDN[CloudFront CDN<br/>web build, base map,<br/>gym tiles]
+    App([Expo app<br/>Web / Android / iOS]) --> CDN[CDN<br/>Cloudflare demo / CloudFront scale<br/>web build, base map, gym tiles]
     CDN --> API[Fastify API]
     API <--> PG[(Postgres + PostGIS<br/>source of truth)]
     API <--> C[(Cache)]
@@ -46,12 +46,12 @@ One `MODE` setting, read once at startup, picks the implementation behind each i
 
 | | **Demo mode** (near-free) | **Scale mode** (paying users) |
 |---|---|---|
-| Hosting | One Lightsail instance, Docker Compose | ECS Fargate, autoscaled on queue depth |
-| Database | Postgres + PostGIS in a container, nightly backup to S3 | RDS Postgres + PostGIS |
+| Hosting | One Oracle Cloud Always Free ARM VM (2 CPU, 12 GB), Docker Compose; Lightsail 4 GB as fallback | ECS Fargate, autoscaled on queue depth |
+| Database | Postgres + PostGIS in a container, nightly backup to Cloudflare R2 | RDS Postgres + PostGIS |
 | Queue | pg-boss (tables in Postgres) | BullMQ on Redis (ElastiCache) |
 | Cache | In memory | Redis (ElastiCache) |
 | LLM | Ollama on Joey's PC via a tunnel | Claude (Anthropic API or Bedrock) |
-| Static files | S3 + CloudFront | S3 + CloudFront |
+| Static files and CDN | Cloudflare Pages (web build), R2 (base map), free Cloudflare CDN (gym tiles) | S3 + CloudFront |
 
 Important data is always written to Postgres first; a queue job only carries IDs. Jobs may fail, and when they do the user is told (see section 5).
 
@@ -65,7 +65,7 @@ Important data is always written to Postgres first; a queue job only carries IDs
 | Repo | npm-workspaces monorepo: `apps/mobile`, `apps/server`, `packages/shared`, `infra/` |
 | Database access | Drizzle ORM + checked-in migrations |
 | Auth | Better Auth, users in our Postgres. Email, Google, Facebook at launch; Apple before the iOS release |
-| Map | MapLibre with self-hosted Protomaps vector tiles on S3 + CloudFront |
+| Map | MapLibre with self-hosted Protomaps vector tiles (Cloudflare R2 in demo, S3 + CloudFront in scale) |
 | Scraper | Playwright in sweep workers; never paid proxies or scraping APIs |
 | Infrastructure | AWS CDK (TypeScript), SSM Parameter Store for secrets, CloudWatch + Sentry |
 
@@ -103,7 +103,7 @@ REST + JSON under `/v1`, every route validated by a Zod schema, OpenAPI docs gen
 
 | Area | Main routes |
 |---|---|
-| Map | `GET /v1/tiles/{geohash4}`: all gyms in a ~39 × 20 km tile, the same for every user, so it is cached by CloudFront |
+| Map | `GET /v1/tiles/{geohash4}`: all gyms in a ~39 × 20 km tile, the same for every user, so it is cached by the CDN |
 | Gyms | `GET /v1/gyms/{id}`, reviews (`POST`, `PUT .../reviews/mine`) |
 | Requests | `POST /v1/sweeps`, `POST /v1/gyms`, `POST /v1/gyms/{id}/changes` → `202` + request ID |
 | Status | `GET /v1/requests/{id}` (polling), `POST /v1/requests/{id}/retry`, `GET /v1/me/requests` |
