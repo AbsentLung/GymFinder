@@ -12,14 +12,22 @@ export async function getFxRates(): Promise<Record<string, number>> {
     return row.rates as Record<string, number>
   }
 
-  const res = await fetch("https://open.er-api.com/v6/latest/USD")
-  const data = await res.json()
-  if (data.result !== "success") throw new Error("FX rate fetch failed")
+  try {
+    const res = await fetch("https://open.er-api.com/v6/latest/USD", { signal: AbortSignal.timeout(5000) })
+    const data = await res.json()
+    if (data.result !== "success") throw new Error("FX rate fetch failed")
 
-  await db
-    .insert(fxRates)
-    .values({ id: "latest", rates: data.rates, fetchedAt: new Date() })
-    .onConflictDoUpdate({ target: fxRates.id, set: { rates: data.rates, fetchedAt: new Date() } })
+    await db
+      .insert(fxRates)
+      .values({ id: "latest", rates: data.rates, fetchedAt: new Date() })
+      .onConflictDoUpdate({ target: fxRates.id, set: { rates: data.rates, fetchedAt: new Date() } })
 
-  return data.rates as Record<string, number>
+    return data.rates as Record<string, number>
+  } catch (e) {
+    // Every tile/gym-details read converts prices through this - an
+    // outage after the cache expires would otherwise 500 every one of
+    // them. A stale rate is still far better than no rate at all.
+    if (row) return row.rates as Record<string, number>
+    throw e
+  }
 }
