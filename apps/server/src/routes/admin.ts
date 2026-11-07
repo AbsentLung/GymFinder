@@ -6,6 +6,7 @@ import { db } from "../db/index.js"
 import { gymChanges, users } from "../db/schema.js"
 import { requireAdmin } from "../auth-guard.js"
 import { applyDecision } from "../jobs/bot-review.js"
+import { tryReverseGeocode } from "../geocode.js"
 
 interface CurrentGymRow {
   [key: string]: unknown
@@ -45,6 +46,18 @@ async function fetchCurrentGym(gymId: number) {
   }
 }
 
+// add_gym proposals have no gymId yet, so their own lat/lng is the only
+// location info available; every other kind edits an existing gym.
+function changeCoordinates(
+  currentGym: { location: { lat: number; lng: number } } | null,
+  proposed: unknown
+): { lat: number; lng: number } | null {
+  if (currentGym) return currentGym.location
+  const p = proposed as { lat?: unknown; lng?: unknown }
+  if (typeof p.lat === "number" && typeof p.lng === "number") return { lat: p.lat, lng: p.lng }
+  return null
+}
+
 export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/v1/admin/changes",
@@ -75,17 +88,22 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
         .limit(20)
 
       const items = await Promise.all(
-        rows.map(async (row) => ({
-          id: String(row.id),
-          requestId: row.requestId ? String(row.requestId) : null,
-          gymId: row.gymId ? String(row.gymId) : null,
-          proposed: row.proposed,
-          currentGym: row.gymId ? await fetchCurrentGym(row.gymId) : null,
-          evidence: row.evidence,
-          reviewStatus: row.reviewStatus,
-          decidedBy: row.decidedBy,
-          createdAt: row.createdAt,
-        }))
+        rows.map(async (row) => {
+          const currentGym = row.gymId ? await fetchCurrentGym(row.gymId) : null
+          const coords = changeCoordinates(currentGym, row.proposed)
+          return {
+            id: String(row.id),
+            requestId: row.requestId ? String(row.requestId) : null,
+            gymId: row.gymId ? String(row.gymId) : null,
+            proposed: row.proposed,
+            currentGym,
+            locationLabel: coords ? await tryReverseGeocode(coords.lat, coords.lng) : null,
+            evidence: row.evidence,
+            reviewStatus: row.reviewStatus,
+            decidedBy: row.decidedBy,
+            createdAt: row.createdAt,
+          }
+        })
       )
       return { items, nextCursor: rows.length === 20 ? rows[rows.length - 1].id : null }
     }
