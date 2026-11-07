@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { countryNameFromCode, fixMojibake, iso3ToIso2, isAllowedBoundaryLicense, photonPlaceFromResponse } from "./areas.js"
+import { countryNameFromCode, decodeDbfText, iso3ToIso2, isAllowedBoundaryLicense, photonPlaceFromResponse } from "./areas.js"
 import { ISO3_TO_ISO2 } from "./iso-country-codes.js"
 
 describe("isAllowedBoundaryLicense", () => {
@@ -42,15 +42,24 @@ describe("iso3ToIso2", () => {
   })
 })
 
-describe("fixMojibake", () => {
-  it("repairs UTF-8 read as Windows-1252", () => {
-    expect(fixMojibake("Ã‰VORA")).toBe("ÉVORA")
-    expect(fixMojibake("RegiÃ£o AutÃ³noma dos AÃ§ores")).toBe("Região Autónoma dos Açores")
+// What shp2pgsql -W LATIN1 hands back: one char per raw byte.
+const asLatin1 = (bytes: Buffer) => bytes.toString("latin1")
+
+describe("decodeDbfText", () => {
+  it("decodes names stored as UTF-8", () => {
+    expect(decodeDbfText(asLatin1(Buffer.from("ÉVORA", "utf-8")))).toBe("ÉVORA")
+    expect(decodeDbfText(asLatin1(Buffer.from("Região Autónoma dos Açores", "utf-8")))).toBe("Região Autónoma dos Açores")
+    expect(decodeDbfText(asLatin1(Buffer.from("เชียงใหม่", "utf-8")))).toBe("เชียงใหม่")
   })
 
-  it("leaves correct names alone", () => {
-    expect(fixMojibake("Åland Islands")).toBe("Åland Islands")
-    expect(fixMojibake("Bali")).toBe("Bali")
+  it("decodes names stored as Windows-1252", () => {
+    expect(decodeDbfText(asLatin1(Buffer.from("Päijät-Häme", "latin1")))).toBe("Päijät-Häme")
+    // 0x96 is an en dash in Windows-1252 (a control character in Latin-1).
+    expect(decodeDbfText(asLatin1(Buffer.from([0x41, 0x96, 0x42])))).toBe("A–B")
+  })
+
+  it("leaves plain ASCII alone", () => {
+    expect(decodeDbfText("Bali")).toBe("Bali")
   })
 })
 
