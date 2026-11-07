@@ -22,7 +22,11 @@ export async function buildApp() {
   // credentials: true is needed for the web app's session cookie to
   // travel cross-origin at all. origin: true is required alongside it -
   // the CORS spec forbids a literal wildcard with credentialed requests.
-  await app.register(cors, { origin: true, credentials: true })
+  // methods defaults to GET,HEAD,POST only - every PUT/PATCH/DELETE route
+  // (promote-to-admin, edit-my-review, unlink-push-token, delete-account)
+  // would silently fail preflight on web otherwise, with no request ever
+  // reaching the server to show up in a log.
+  await app.register(cors, { origin: true, credentials: true, methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] })
 
   // Not under /v1 (API.md 1.6) - for the load balancer/Docker, not the app.
   app.get("/healthz", async () => ({ status: "ok" }))
