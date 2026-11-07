@@ -23,9 +23,9 @@ These were agreed with Joey. Follow them unless he changes them; update this fil
 - Never use the public Nominatim server in production.
 
 ### Gym location names (decided by Joey 2026-11-07, details in LOCATION_NAMES.md)
-- Every gym's city / region / county / country is stored: `gyms.area_id` → `areas` (boundary polygons with a `parent_id` chain), plus free-text `gyms.postcode`. Never copy the names onto `gyms`, and never geocode at read time; read routes walk `parent_id` and return a `place` object.
-- Boundaries come from geoBoundaries (CGAZ ADM0-2, gbOpen ADM3 only under an allowed license), loaded by `npm run seed:areas` (separate from migrations; `--fixture` for tests). CC BY 4.0: attribution required.
-- Fill on write with the `gym-area` worker job (`ST_Contains`, deepest level first) when a gym is created or moves. Photon reverse-geocoding is only the fallback job when no polygon matches: rate-limited (~1 req/s shared), retried, never blocks the gym, and only maps onto existing areas. `npm run backfill:areas` fills old gyms.
+- Regions only for now, no cities (Joey, 2026-11-07): every gym stores `gyms.region_id` → `regions` (state / province / island polygons), plus `gyms.country_code` and free-text `gyms.postcode`. The app shows "Region, Country". Never copy the region name onto `gyms`, and never geocode at read time; read routes join and return a `place` object.
+- Regions come from geoBoundaries CGAZ ADM1, loaded by `npm run seed:regions` (separate from migrations; `--fixture` for tests). CC BY 4.0: attribution required.
+- Fill on write with the `gym-region` worker job (`ST_Contains`) when a gym is created or moves. Photon reverse-geocoding is only the fallback job when no polygon matches: rate-limited (~1 req/s shared), retried, never blocks the gym, and only maps onto existing regions. `npm run backfill:regions` fills old gyms.
 - Don't use "admin" in these names (it clashes with the admin role).
 
 ### Gym data

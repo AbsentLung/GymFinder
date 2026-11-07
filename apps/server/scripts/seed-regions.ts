@@ -99,8 +99,10 @@ async function loadCgaz(countries: string[] | null) {
   const countryFilter = countries ? sql`AND shapegroup IN (${sql.join(countries.map((c) => sql`${c}`), sql`, `)})` : sql``
   await db.execute(sql`
     INSERT INTO regions_load (source_ref, name, iso3, geom)
-    SELECT 'cgaz:ADM1:' || shapeid, btrim(shapename), shapegroup, geom FROM regions_load_raw
-    WHERE btrim(shapename) <> '' ${countryFilter}
+    SELECT 'cgaz:ADM1:' || shapeid, n.name, shapegroup, geom FROM regions_load_raw
+    -- Some names carry stray tabs/newlines (e.g. Hanoi); some are blank.
+    CROSS JOIN LATERAL (SELECT regexp_replace(shapename, '^\\s+|\\s+$', '', 'g') AS name) n
+    WHERE n.name <> '' ${countryFilter}
     ON CONFLICT (source_ref) DO NOTHING
   `)
   await db.execute(sql`DROP TABLE regions_load_raw`)
