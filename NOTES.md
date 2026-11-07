@@ -14,7 +14,6 @@ Decision log, unconfirmed assumptions and known limitations. One line each: deci
 - Unapproved add_gym rows resolve `place` with a read-time polygon lookup / a stored area_id on gym_changes / no extra column; local indexed query, not geocoding.
 - `place` type kept in server and app separately / Zod schema in packages/shared / packages/shared is still an unused placeholder; using it would add Zod to the app bundle.
 - Country display name from the ISO code (Intl.DisplayNames) / CGAZ's own names / CGAZ uses "Korea, South" style.
-- Fixed while testing: approving any add_gym failed (categories interpolated as a value list, "()" when empty). Now bound as text[] like category edits.
 - Assumption (unconfirmed): showing "City, Region, Country" under the address (same "Address" label, also when there's no address) counts as Joey's OK for that visible change, since the brief asks for it.
 - Stubbed: Photon is stubbed in the integration tests; the real service is never called by tests.
 - Limitation (blocking, open question 0): CGAZ ADM1/ADM2 are heavily simplified (Shanghai Municipality = 21 vertices), so central Shanghai, Hong Kong Island, central Lisbon and coastal San Juan miss their region/county. Roadmap item left unchecked until the boundary source is decided.
