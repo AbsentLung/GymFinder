@@ -114,6 +114,15 @@ function LiveDot() {
   );
 }
 
+function AccountLink({ label, onPress }: { label: string; onPress: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Pressable onPress={onPress} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)}>
+      <Text style={[styles.accountLink, hovered && styles.accountLinkHovered]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function AccountCorner() {
   const router = useRouter();
   const { user } = useAuth();
@@ -121,23 +130,13 @@ function AccountCorner() {
     <View style={styles.accountCorner}>
       {user ? (
         <>
-          <Pressable onPress={() => router.push('/profile')}>
-            <Text style={styles.accountLink}>{user.name} ⚙️</Text>
-          </Pressable>
-          {user.isAdmin && (
-            <Pressable onPress={() => router.push('/admin')}>
-              <Text style={styles.accountLink}>Admin</Text>
-            </Pressable>
-          )}
+          {user.isAdmin && <AccountLink label="Admin Settings" onPress={() => router.push('/admin')} />}
+          <AccountLink label="Profile Settings" onPress={() => router.push('/profile')} />
         </>
       ) : (
         <>
-          <Pressable onPress={() => router.push('/auth')}>
-            <Text style={styles.accountLink}>Log in</Text>
-          </Pressable>
-          <Pressable onPress={() => router.push('/auth?mode=signup')}>
-            <Text style={styles.accountLink}>Sign up</Text>
-          </Pressable>
+          <AccountLink label="Log in" onPress={() => router.push('/auth')} />
+          <AccountLink label="Sign up" onPress={() => router.push('/auth?mode=signup')} />
         </>
       )}
     </View>
@@ -221,7 +220,7 @@ const FONT_MONO = 'IBM Plex Mono, ui-monospace, monospace';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  accountCorner: { position: 'absolute', top: 20, right: 24, flexDirection: 'row', gap: 18, zIndex: 20 },
+  accountCorner: { position: 'absolute', top: 20, right: 24, flexDirection: 'column', alignItems: 'flex-end', gap: 6, zIndex: 20 },
   accountLink: {
     fontFamily: FONT_MONO,
     fontSize: 12,
@@ -229,6 +228,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
+  accountLinkHovered: { color: ACCENT },
   // Web-only dot-grid texture; native renders a plain dark background.
   dotGrid: {
     position: 'absolute',
