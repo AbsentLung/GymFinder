@@ -223,7 +223,7 @@ Gym details response:
   "name": "Bali Strength Club",
   "location": { "lat": -8.6501, "lng": 115.1385 },
   "address": "Jl. Raya Canggu 12",
-  "place": { "city": "Canggu", "region": "Bali", "county": "Badung", "country": "Indonesia", "countryCode": "ID", "postcode": "80361" },
+  "place": { "region": "Bali", "country": "Indonesia", "countryCode": "ID", "postcode": "80361" },
   "categories": ["commercial"],
   "description": "...",
   "acceptsDropIn": true,
@@ -255,12 +255,12 @@ Gym details response:
 
 `prices` can hold a verified and an unverified price of the same kind; `verifiedBy: null` marks unverified ones. `openingHours` uses the OSM `opening_hours` format, which the app parses for "open now".
 
-**`place`** (also on request changes in 2.4 and admin items in 2.6) holds stored location names, read from our own `areas` boundaries, never geocoded at read time (LOCATION_NAMES.md). Every field can be `null`:
-- `city`, `region` (state / province / island) and `county` are the area names from walking up `gyms.area_id`.
-- `country` is the English name for `countryCode` (ISO 3166-1 alpha-2).
+**`place`** (also on request changes in 2.4 and admin items in 2.6) holds stored location names, read from our own `regions` boundaries, never geocoded at read time (LOCATION_NAMES.md). Every field can be `null`:
+- `region` is the state / province / island name, from `gyms.region_id`.
+- `country` is the English name for `countryCode` (ISO 3166-1 alpha-2, from `gyms.country_code`).
 - `postcode` is free text, only when a source had a structured one.
 
-`place` is all-null until the background fill job has run, or if no boundary or Photon match was found. The app shows `city, region, country` next to the address, or in its place when there is no address.
+`place` is all-null until the background fill job has run. `region` stays null if no boundary or Photon match was found, though `country` may still be set. The app shows `region, country` next to the address, or in its place when there is no address.
 
 ### 2.4 Requests: one shape for sweeps and gym changes (FR-11, FR-16, FR-18)
 

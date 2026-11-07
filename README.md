@@ -71,7 +71,7 @@ Steps:
   - [ ] Individual gym sidebar
   - [ ] "Find More Gyms"
   - [ ] Individual gym chatbot
-  - [ ] Location names for gyms (city/region/country/postcode), see [`LOCATION_NAMES.md`](./LOCATION_NAMES.md)
+  - [x] Location names for gyms (region/country/postcode), see [`LOCATION_NAMES.md`](./LOCATION_NAMES.md)
   - [ ] Anything else that came up in phases 1 and 2
 - [ ] Polish for mobile web, Android and iOS specifics
 
