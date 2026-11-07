@@ -3,7 +3,7 @@
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { isDuplicateMatch } from "../lib.js"
-import { countryCodeAtSql } from "../area-queries.js"
+import { findDeepestAreaAt } from "../area-queries.js"
 import { enqueueGymArea } from "./gym-area.js"
 import type { RawGym } from "../interfaces/source.js"
 
@@ -59,9 +59,11 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
         ON CONFLICT (source, external_id) DO NOTHING
       `)
     } else {
+      // Set now so price currency is right before the gym-area job runs.
+      const countryCode = (await findDeepestAreaAt(g.lat, g.lng))?.countryCode ?? null
       const inserted = await db.execute<{ id: number }>(sql`
         INSERT INTO gyms (name, location, address, description, postcode, country_code)
-        VALUES (${g.name}, ${point}, ${g.address ?? null}, ${g.description ?? null}, ${g.postcode ?? null}, ${countryCodeAtSql(point)})
+        VALUES (${g.name}, ${point}, ${g.address ?? null}, ${g.description ?? null}, ${g.postcode ?? null}, ${countryCode})
         RETURNING id
       `)
       gymId = inserted.rows[0].id
