@@ -1,34 +1,34 @@
 # Location names for gyms
 
-Status: building (branch `phase-6-location-names-slice`, stacked on #33). Linked from [DESIGN.md](./DESIGN.md) and the [README roadmap](./README.md#roadmap).
+Status: built on branch `phase-6-location-names-slice`, stacked on #33. Linked from [DESIGN.md](./DESIGN.md) and the [README roadmap](./README.md#roadmap).
 
 ## Goal
 
 The gym view (including gyms with no address yet), My requests and the admin approval list all show **"City, Region, Country"** for every gym instantly. Nothing is geocoded at read time: names come from our own Postgres.
 
-Today the admin list calls Photon live for every row (`routes/admin.ts`), and `gyms.country_code` is filled by a synchronous Photon call inside the insert path. Both go away.
+Before this, the admin list called Photon live for every row, and `gyms.country_code` came from a synchronous Photon call inside the insert path. Both are gone.
 
 ## Schema
 
-**New table `areas`**: one row per boundary polygon.
+**New table `areas`**: one row per boundary polygon (migration `0009_location_areas`).
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | bigserial PK | |
-| `name` | text, not null | English or local name as the source gives it |
+| `id` | bigserial PK | Stable across re-seeds (upsert by `source_ref`) |
+| `name` | text, not null | As the source names it |
 | `level` | text, not null | `country` / `region` / `county` / `city` (check constraint) |
-| `parent_id` | bigint, FK → `areas.id`, nullable | Null only for countries |
+| `parent_id` | bigint, FK → `areas.id`, nullable | Null for countries, and for orphans with no containing polygon |
 | `country_code` | text, not null | ISO 3166-1 alpha-2 |
 | `geom` | `geometry(MultiPolygon, 4326)`, not null | GiST index |
-| `source_ref` | text, unique, not null | e.g. `geoBoundaries:<shapeID>`, so the seed can be re-run as an upsert and ids stay stable |
+| `source_ref` | text, unique, not null | `cgaz:ADM1:<shapeID>`, `gbOpen:ADM3:<shapeID>`, `fixture:...` |
 
 **`gyms` gets two columns:**
 - `area_id`: nullable FK → `areas.id` (`ON DELETE SET NULL`), the most specific area that contains the gym.
-- `postcode`: nullable free text (formats vary; many countries have none).
+- `postcode`: nullable free text.
 
-City, region and country text is **not** copied onto `gyms`. Read paths walk `parent_id` up from `area_id` in one recursive query.
+City, region and county text is **not** copied onto `gyms`. Reads walk `parent_id` up from `area_id` in one recursive query.
 
-The existing `gyms.country_code` stays, because it drives which currency a price is shown in. It is now set from the boundaries (a local `ST_Contains` on country polygons at insert) instead of from Photon, and the fill job keeps it in step with the area's country.
+`gyms.country_code` stays, because it drives the price currency. It is set at insert from the polygon lookup (so the currency is right before the job runs), then kept in step by the fill job. Where no polygon exists, the Photon fallback sets it.
 
 The word "admin" is kept out of these names on purpose (it clashes with the admin role).
 
@@ -36,94 +36,118 @@ The word "admin" is kept out of these names on purpose (it clashes with the admi
 
 | Level | Source | Coverage |
 |---|---|---|
-| `country` | geoBoundaries **CGAZ ADM0** | World |
-| `region` (state / province / island) | geoBoundaries **CGAZ ADM1** | World |
-| `county` | geoBoundaries **CGAZ ADM2** | World where the country has an ADM2 level |
-| `city` | geoBoundaries **gbOpen ADM3**, per country | Only countries where gbOpen has ADM3 under an allowed license (see below) |
+| `country` | geoBoundaries **CGAZ ADM0** | 199 ISO countries + promoted territories |
+| `region` (state / province / island) | geoBoundaries **CGAZ ADM1** | World (3,224 polygons) |
+| `county` | geoBoundaries **CGAZ ADM2** | World where the country has ADM2 |
+| `city` | geoBoundaries **gbOpen ADM3**, per country | 81 countries publish ADM3; 65 pass the license filter (2026-11-07 listing) |
 
-- CGAZ ("Comprehensive Global Administrative Zones") is one gap-filled global composite. Disputed areas follow US Department of State definitions. It comes as shapefile zips (about 100–150 MB each) from `github.com/wmgeolab/geoBoundaries/raw/main/releaseData/CGAZ/`.
-- **License:** geoBoundaries is CC BY 4.0. **Attribution is required.** In an app that means "geoBoundaries" (or `www.geoboundaries.org`) shown prominently, e.g. in the credits next to the OpenStreetMap attribution (README roadmap Phase 7). Adding it to the UI is a visible change, so it waits for Joey's OK (see open questions).
-- gbOpen licenses vary per country, e.g. "CC BY 3.0 IGO". The seed only loads a gbOpen boundary if its `boundaryLicense` is CC0, public domain, CC BY (any version, including IGO) or ODbL. It logs and skips everything else.
-- Loading uses `shp2pgsql`, which ships with PostGIS (Homebrew and the `postgis/postgis` image), so no new npm dependency. Downloads go to a temp dir and are never committed.
+**License.** geoBoundaries is CC BY 4.0, and **attribution is required**. In an app that means "geoBoundaries" (or `www.geoboundaries.org`) shown prominently, e.g. in the credits next to the OpenStreetMap attribution. Adding it to the UI is a visible change, so it waits for Joey's OK (open question 3).
+
+gbOpen licenses vary per country. The seed loads one only if `boundaryLicense` is ODbL, CC BY (any version, including IGO), CC0 or Public Domain. It logs and skips everything else:
+- share-alike: CC BY-SA 2.0 / 4.0;
+- national licenses: Etalab (France), swisstopo, DL-DE-BY, OGL v3, KOGL;
+- "Other - Direct Permission".
+
+**What the real files taught us** (checked against the downloads, 2026-11-07):
+- **Country keys.** CGAZ keys countries by ISO3 in `shapeGroup`. ADM0 has no `shapeID` (one row per country, so `source_ref` uses the ISO3); ADM1/ADM2 do.
+- **Disputed areas** use numeric codes (`111`–`129`: Aksai Chin, Gaza Strip, West Bank, Spratly Is, …). They have no ISO code and are skipped, so gyms there get the Photon fallback.
+- **Territories folded into a parent.** Hong Kong and Macau are ADM1 regions of China; Puerto Rico, Guam, American Samoa, the Northern Mariana Islands and the US Virgin Islands sit under the USA; Åland sits under Finland. A short explicit list (`TERRITORY_OVERRIDES`) promotes them to country level with their own code, so a Hong Kong gym gets `HK` (and HKD), not `CN`.
+- **Territories missing entirely**, e.g. Réunion, French Polynesia, Aruba, Curaçao, Bermuda and the Cayman Islands. The Photon fallback still sets `country_code` there, so currency works, but there is no area to point at.
+- **Mixed text encodings.** The `.dbf` header claims Windows-1252, and `shp2pgsql` lets that override `-W UTF-8`. Most names are actually UTF-8, but some really are Windows-1252 ("Päijät-Häme"). The seed reads raw bytes (`-W LATIN1`) and decodes each name: UTF-8 if valid, otherwise Windows-1252 (`decodeDbfText`).
+- **Unnamed polygons.** Some ADM2 polygons have no name; they are skipped, so gyms there match the region.
+- **Country names** in CGAZ are US State Department style ("Korea, South", "Burma"). The API shows the English name for the ISO code instead (`Intl.DisplayNames`).
+- **No ADM3 for big backpacker countries.** Indonesia, Thailand, the USA and Vietnam have none, so gyms there get "County, Region, Country" at best (open question 1).
 
 **Seed script** (`npm run seed:areas --workspace apps/server`), separate from migrations:
-- `--fixture`: loads `apps/server/scripts/fixtures/areas.geojson`, a few small hand-made polygons with no download. Tests and CI use this.
-- No flag: downloads CGAZ ADM0/1/2 (+ allowed gbOpen ADM3), loads each into a staging table, then upserts into `areas` by `source_ref`:
-  - `ST_Multi(ST_MakeValid(geom))`
-  - ISO3 → ISO2 country codes
-  - `parent_id` = the area one level up whose polygon contains `ST_PointOnSurface(child)`
-- Optional `--countries=THA,IDN` limits the load, for local dev.
+- `--fixture` loads `apps/server/scripts/fixtures/areas.geojson`: small hand-made rectangles covering a city, a county with no city, a promoted territory and a disputed code. Tests (and later CI) use this.
+- No flag: downloads CGAZ ADM0/1/2 (about 350 MB of zips, deleted afterwards) and loads each with `shp2pgsql | psql`. It then fetches the allowed gbOpen ADM3 GeoJSON (simplified geometry). After that it:
+  - upserts into `areas` with `ST_Multi(ST_CollectionExtract(ST_MakeValid(geom), 3))`;
+  - promotes territories;
+  - links parents by geometry, one parent level at a time, nearest first;
+  - inherits `country_code` down the tree.
+- `--countries=THA,IDN` (ISO3) limits the load, for local dev.
+- Needs `shp2pgsql`, `psql` and `unzip` on PATH (`shp2pgsql` ships with PostGIS), so no new npm dependency.
 
 ## Flow
 
 ```mermaid
 flowchart LR
   W[Gym inserted or location moved] --> J1[[gym-area job]]
-  J1 -->|ST_Contains, deepest level wins| A[(gyms.area_id)]
+  J1 -->|ST_Contains, deepest level first| A[(gyms.area_id)]
   J1 -->|no polygon matched| J2[[gym-area-photon job]]
-  J2 -->|rate-limited, retried| P[Photon reverse]
+  J2 -->|1 req/s shared limit, 5 retries| P[Photon reverse]
   P -->|match names onto existing areas| A
-  B[[area-backfill job]] -->|gyms with area_id NULL, batches| J1
+  B[[area-backfill job]] -->|gyms with area_id NULL, 500 per page| J1
 ```
 
-1. **Fill on write.** After a gym row is committed, the writer enqueues `gym-area { gymId }` (dedup `jobId` = `gym-area:<id>`). The writers are:
-   - `gym-upsert.ts`, for Overpass refresh and sweeps, on insert and whenever the weekly refresh actually moves `location`;
-   - `bot-review.ts`, when an approved `add_gym` is inserted.
+1. **Fill on write.** After a gym row is committed, the writer enqueues `gym-area { gymId }` (dedup `jobId` `gym-area-<id>`; BullMQ rejects `:` in ids). The writers are:
+   - `gym-upsert.ts` (Overpass refresh, sweeps), on insert and whenever the weekly refresh actually moves `location`;
+   - `bot-review.ts`, after the transaction that inserts an approved `add_gym`.
 
-   The job runs one query: `SELECT id FROM areas WHERE ST_Contains(geom, gym.location) ORDER BY level depth DESC LIMIT 1`, and sets `area_id` (and `country_code` if the area has one).
-2. **Photon fallback.** If no polygon matched (e.g. a gym on a pier just outside a simplified coastline), the job enqueues `gym-area-photon { gymId }` with retries and backoff.
-   - The job calls `https://photon.komoot.io/reverse` at most **1 request per second across all workers**. It uses the cache-backed limiter (Redis in scale mode); a job over the limit re-queues itself with a short delay instead of using up a retry.
-   - It maps Photon's `countrycode`, `state`, `county` and `city` onto **existing** areas, matching each level by case-insensitive name under the parent it found, and sets `area_id` to the deepest match.
-   - When retries run out, or nothing maps, `area_id` stays null. The gym is still saved and shown; the location line is just missing.
-3. **Postcode.** Overpass `addr:postcode` → `RawGym.postcode` → `gyms.postcode` (COALESCE, never overwriting). The Google Maps scraper and gym-website research don't extract a structured postcode today, so they don't fill it yet (known limitation, not parsed from free-text addresses).
-4. **Backfill.** `npm run backfill:areas --workspace apps/server` enqueues one `area-backfill` job. It pages through `gyms WHERE area_id IS NULL` by id (500 per batch) and enqueues `gym-area` for each. Re-run it after loading more boundary data. It is idempotent thanks to the dedup `jobId`.
+   The job looks up the deepest area one level at a time (city, county, region, country), stopping at the first match, so huge country outlines are rarely tested. It sets `area_id` and `country_code`.
+2. **Photon fallback.** Only when no polygon matched. `gym-area-photon` waits for a slot in a cache-backed limiter (about 1 request per second across all workers; Redis in scale mode), then calls `photon.komoot.io/reverse`.
+   - It maps Photon's `countrycode`, `state`, `county` and `city`/`district` onto **existing** areas by case-insensitive name within that country, preferring children of what already matched. It never creates areas.
+   - It sets `country_code` from Photon even if no area maps.
+   - Outages throw, and the queue retries 5 times with exponential backoff (30 s first). When retries run out, `area_id` stays null and the gym is unaffected.
+3. **Postcode.** Overpass `addr:postcode` → `RawGym.postcode` → `gyms.postcode` (COALESCE, never overwritten). The Google Maps scraper and website research have no structured postcode today, so they don't set one (never parsed from free text).
+4. **Backfill.** `npm run backfill:areas --workspace apps/server` enqueues `area-backfill`. Each job enqueues `gym-area` for the next 500 gyms with no area (by id) and chains the next page. Re-run it after loading more boundaries.
 
-Every job only carries IDs; Postgres stays the source of truth. Both jobs run on pg-boss (demo) or BullMQ (scale) through `QueueInterface`, which gains `retries` and `retryDelayMs` options.
+`QueueInterface` gained opt-in `retries` / `retryDelayMs` (exponential backoff) for both pg-boss and BullMQ; other queues keep their current behavior.
 
 ## API fields
 
-Every response below gains a `place` object (Zod schema `PlaceSchema` in `packages/shared`, every field nullable):
+`place` is added to:
+- `GET /v1/gyms/{id}`;
+- each change in `GET /v1/me/requests` / `GET /v1/requests/{id}`, together with `gymId` and `gymName`;
+- each item in `GET /v1/admin/changes`, where it replaces the old live-Photon `locationLabel`.
 
 ```json
 "place": { "city": "Ubud", "region": "Bali", "county": "Gianyar", "country": "Indonesia", "countryCode": "ID", "postcode": "80571" }
 ```
 
-- `GET /v1/gyms/{id}`: `place` on the gym.
-- `GET /v1/me/requests` and `GET /v1/requests/{id}`: each change gets `gymId`, `gymName` and `place`.
-  - `add_gym` changes that haven't created a gym yet use the proposal's own lat/lng, resolved with a read-time `ST_Contains` against `areas`. That is a local indexed query, not geocoding.
-- `GET /v1/admin/changes`: `place` per row, which replaces `locationLabel`. It uses the same rule for unapproved `add_gym` rows.
+- Every field is nullable; a gym not yet filled returns all-null names.
+- An `add_gym` change with no gym row yet resolves `place` from the proposal's lat/lng with the same local polygon lookup. That's a database query, not geocoding.
+- The type lives in the server (`area-queries.ts`) and the app (`gym-panels.tsx`). `packages/shared` is still an empty placeholder stack-wide; wiring it up would add Zod to the app bundle, a separate decision.
 
-A gym with no `area_id` returns `place` with every name null (postcode may still be set).
+**App** (layout unchanged):
+- **Gym panel (native and web).** `AddressRow` shows "City, Region, Country" on a second line under the address, or alone under the same "Address" label when there is no address.
+- **Admin queue.** The place sits where the Photon label was, and stands in for a missing address on the "Current" line.
+- **My requests** shows no location today, so it gets the API fields but no new UI.
 
-**App:** "City, Region, Country" is shown where the address is already shown: the gym panel on web and native, and the admin queue row. If the gym has no address, the place line takes its place. Any null part is skipped. My requests currently shows no gym location at all, so it gets the fields in the API but no new UI (layout unchanged).
-
-## Test plan
+## Tests
 
 - **Unit** (`npm test`):
-  - Photon-properties → area-name picking;
-  - `formatPlace`;
-  - gbOpen license allow-list;
-  - ISO3 → ISO2.
-- **Integration** (`npm run test:integration`, needs PostGIS and Redis):
-  - Runs twice, `MODE=demo` (pg-boss) and `MODE=scale` (BullMQ on Redis), against a throwaway `gymfinder_test` database: migrate, then `seed:areas --fixture`.
-  - Checks:
-    - a gym inside a fixture city gets that city;
-    - a gym in a county with no city gets the county;
-    - a gym outside every polygon falls back to Photon (Photon is **stubbed** with a fixed response, so tests don't hit the real service);
-    - a Photon failure leaves `area_id` null without throwing out of the write path;
-    - backfill fills old gyms;
-    - the three API responses return `place`.
-- `npm run typecheck`, `npm run lint`.
+  - license allow-list;
+  - ISO3 → ISO2 (unique, two-letter);
+  - `.dbf` text decoding (UTF-8, Windows-1252, Thai);
+  - Photon parsing;
+  - country names;
+  - OSM postcode.
+- **Integration** (`npm run test:integration --workspace apps/server`): needs PostGIS on `localhost:5433` and Redis on `6379`, or set `TEST_DATABASE_URL` to any `*_test` database.
+  - Each run recreates `gymfinder_test`, migrates and loads the fixture, then runs the same 8 tests with `--mode demo` (pg-boss) and `--mode scale` (BullMQ). Vitest overwrites `process.env.MODE`, hence `--mode`.
+  - The tests cover:
+    - city match + postcode;
+    - county-only;
+    - Hong Kong → `HK`;
+    - Photon fallback mapping;
+    - Photon down → gym kept, `area_id` null;
+    - a refresh moving the gym;
+    - backfill;
+    - My requests + admin list over HTTP with a real signed-up admin, including approving an `add_gym` end to end.
+  - **Photon is stubbed** in these tests (fixed responses, a 503 for the "down" case); they never call the real service.
+- The full CGAZ + gbOpen load was run by hand for IDN, CHN, PRT, FRA, THA, USA and FIN into a throwaway database. It is not part of the automated tests (too large).
 
 ## Open questions
 
-1. **City coverage.** Polygons only give a city where gbOpen has an ADM3 level, and ADM3 isn't "city" in every country (sometimes a sub-district). So many gyms will show "County, Region, Country" or "Region, Country". Options:
-   - (a) also run the Photon job when the deepest match isn't a city, and let it create a geometry-less city row under the matched area;
-   - (b) load GeoNames populated places (CC BY 4.0) and pick the nearest within a few km;
+1. **City coverage.** Polygons only give a city where gbOpen has ADM3 under an allowed license. ADM3 isn't "city" everywhere, and Indonesia, Thailand, the USA and Vietnam have none. Options:
+   - (a) also run Photon when the deepest match isn't a city, and store a geometry-less city row;
+   - (b) GeoNames populated places (CC BY 4.0), nearest within a few km;
    - (c) accept the gap.
 
-   **(c) for now**, since the brief maps Photon onto existing areas only.
-2. **Name matching for the Photon fallback.** Photon (`lang=en`) and geoBoundaries names don't always agree ("Bali" vs "Provinsi Bali"). Simple case-insensitive matching will miss some. Should we add `unaccent` / prefix stripping?
-3. **geoBoundaries attribution in the app**: where and when? Needs Joey's OK because it's visible.
-4. **`gyms.country_code` vs the area's country**: keep both (current choice: currency logic stays untouched) or derive currency from `area_id` later?
-5. **CI**: there is no test workflow yet (README Phase 3 item). The fixture set and `test:integration` script are ready for one.
+   **Currently (c)**, as the brief maps Photon onto existing areas only.
+2. **Photon name matching** is exact and case-insensitive, so "Bali" vs "Provinsi Bali" or "Chiang Mai Province" vs "Chiang Mai" can miss. Add normalisation?
+3. **geoBoundaries attribution** in the app: where and when? (Visible change, needs Joey's OK.)
+4. **More gbOpen licenses?** Etalab (France), OGL v3 (UK), DL-DE-BY and KOGL are attribution-only open licenses but are skipped for now.
+5. **Territories with no polygon** (Réunion, French Polynesia, Aruba, …): add per-territory boundaries from another source?
+6. **Display names** keep the source's style ("Chiang Mai Province", "LISBOA", "Hong Kong SAR China"). Tidy them?
+7. **CI.** There is no test workflow yet (README Phase 3 item); the fixture and `test:integration` are ready for one.

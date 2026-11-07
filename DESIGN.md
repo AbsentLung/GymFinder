@@ -95,6 +95,7 @@ erDiagram
 | `gym_changes` | Each proposed change, its evidence and review status. Also the audit log |
 | `tiles`, `tile_fetches` | When each geohash5 cell was last refreshed from each source |
 | `users`, `reviews` | Accounts with a `role` (user / admin); one editable review per user per gym |
+| `areas` | Boundary polygons (country / region / county / city) from geoBoundaries, with a `parent_id` chain. `gyms.area_id` points at the most specific one, so "City, Region, Country" is read from Postgres, never geocoded at read time ([LOCATION_NAMES.md](./LOCATION_NAMES.md)) |
 
 IDs are bigints (sent to the app as strings). Full schema: [STACK_AND_SCHEMA.md part 2](./STACK_AND_SCHEMA.md#part-2-database-schema).
 
@@ -130,5 +131,6 @@ The app calls Photon (location search) and the base map tiles directly. Only wor
 - **Tiles.** The map loads geohash4 tiles; Overpass refreshes (about weekly) and sweeps work on geohash5 cells. Stale tiles are served at once and refreshed in the background. An approved change invalidates its tile in the CDN.
 - **UI stays as it is.** The vibe-coded app's UI (`GymFinderVibeCoded` branch) is kept: right sidebar with collapsible sections, filter chips, day-pass list, gym panel, add/edit flows. The restructure changes what's underneath, not how it looks. The only addition is an Edit button on your own review.
 - **Filters run in the app** on loaded tiles, exactly as in the vibe-coded app. No price filter and no server search.
+- **Location names are stored, not looked up.** A worker fills `gyms.area_id` by `ST_Contains` against `areas` when a gym is created or moves; Photon reverse-geocoding is only a rate-limited, retried fallback when no polygon matches. API responses carry a `place` object.
 - **No secrets in the repo.** Config lives in env vars and SSM.
 - **LLM behind one interface**, so Ollama can be swapped for Claude without touching business code.
