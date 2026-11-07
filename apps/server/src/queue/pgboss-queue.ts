@@ -27,7 +27,15 @@ export class PgBossQueue implements QueueInterface {
 
   // `exclusive` makes singletonKey actually dedupe, but drops any job sent without one - every
   // `send` to a queue listed here must supply a jobId.
-  private static readonly SINGLETON_QUEUES = new Set(["tile-refresh", "bot-review", "sweep", "research-gym"])
+  private static readonly SINGLETON_QUEUES = new Set([
+    "tile-refresh",
+    "bot-review",
+    "sweep",
+    "research-gym",
+    "gym-area",
+    "gym-area-photon",
+    "area-backfill",
+  ])
 
   private async ensureQueue(name: string) {
     if (this.knownQueues.has(name)) return
@@ -44,6 +52,9 @@ export class PgBossQueue implements QueueInterface {
       ...(opts.delay !== undefined ? { startAfter: new Date(Date.now() + opts.delay) } : {}),
       // pg-boss's dedup mechanism is `singletonKey`, not a supplied id.
       ...(opts.jobId !== undefined ? { singletonKey: opts.jobId } : {}),
+      ...(opts.retries !== undefined ? { retryLimit: opts.retries, retryBackoff: true } : {}),
+      // pg-boss counts retry delays in whole seconds.
+      ...(opts.retryDelayMs !== undefined ? { retryDelay: Math.max(1, Math.ceil(opts.retryDelayMs / 1000)) } : {}),
     })
     return { id }
   }
