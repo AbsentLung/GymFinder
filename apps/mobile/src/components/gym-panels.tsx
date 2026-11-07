@@ -689,6 +689,7 @@ export function SuggestEditForm({
           value={description}
           onChangeText={setDescription}
           placeholder="How do you know this?"
+          placeholderTextColor={PLACEHOLDER_COLOR}
           multiline
           numberOfLines={3}
         />
