@@ -38,6 +38,7 @@ Each requirement has an ID so later docs (`DESIGN.md`, PRs, tests) can point at 
 - **FR-12** Gyms found by a sweep go through the same approval flow as user submissions (FR-16, FR-17).
 - **FR-22** A signed-out sweep still runs, but there's no account to attach it to or page to show it on. If the user is signed in, each sweep request and its status (pending, completed, failed) is saved, and shown on the same page as their add/update gym requests (FR-18).
 - **FR-23** Users are told when their sweep request fails.
+- **FR-28** A sweep's own Google Maps scrape only gets a gym's name and location. **Decided by Joey (2026-11-07): a low-priority background job researches each newly-found gym's description, prices, categories, drop-in/trial status right after it appears**, so it's never held up waiting to show on the map (same chat-style "find, propose, review" path as FR-9, not auto-trusted).
 
 ### Accounts and roles
 
