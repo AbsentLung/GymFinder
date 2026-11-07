@@ -1,4 +1,4 @@
-// Fresh throwaway database per run: create, migrate, load the fixture areas.
+// Fresh throwaway database per run: create, migrate, load the fixture regions.
 import { execFileSync } from "node:child_process"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -25,7 +25,7 @@ export default async function setup() {
   await migrate(drizzle(pool), { migrationsFolder: join(serverDir, "drizzle") })
   await pool.end()
 
-  execFileSync("npx", ["tsx", "scripts/seed-areas.ts", "--fixture"], {
+  execFileSync("npx", ["tsx", "scripts/seed-regions.ts", "--fixture"], {
     cwd: serverDir,
     env: { ...process.env, DATABASE_URL: url.toString(), MODE: "demo" },
     stdio: "inherit",

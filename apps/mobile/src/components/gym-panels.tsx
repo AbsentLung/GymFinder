@@ -163,20 +163,18 @@ export function isPriceVerified(price: DayPass | PriceEntry): boolean {
 
 // Stored location names from the API (LOCATION_NAMES.md); every part may be missing.
 export interface Place {
-  city: string | null;
   region: string | null;
-  county: string | null;
   country: string | null;
   countryCode: string | null;
   postcode: string | null;
 }
 
 export function formatPlace(place: Place | null | undefined): string | null {
-  const parts = [place?.city, place?.region, place?.country].filter(Boolean);
+  const parts = [place?.region, place?.country].filter(Boolean);
   return parts.length > 0 ? parts.join(', ') : null;
 }
 
-// "City, Region, Country" sits under the address, or replaces it when there is none.
+// "Region, Country" sits under the address, or replaces it when there is none.
 export function AddressRow({ address, place }: { address: string | null; place: Place | null | undefined }) {
   const placeLine = formatPlace(place);
   if (!address && !placeLine) return null;

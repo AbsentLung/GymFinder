@@ -1,26 +1,14 @@
-// Pure helpers for the `areas` boundaries (LOCATION_NAMES.md): seed-time
+// Pure helpers for the `regions` boundaries (LOCATION_NAMES.md): seed-time
 // data cleanup and read-time naming. No DB access here.
 import { z } from "zod"
-import type { AreaLevel } from "./db/schema.js"
 import { ISO3_TO_ISO2 } from "./iso-country-codes.js"
-
-export const AREA_DEPTH: Readonly<Record<AreaLevel, number>> = { country: 0, region: 1, county: 2, city: 3 }
-
-// Open licenses whose only duty is attribution (ODbL: share-alike on the
-// database, which we already accept for OSM). Anything else is skipped.
-const ALLOWED_LICENSE_PATTERNS = [/open database license/i, /^creative commons attribution \d/i, /\(cc by [\d.]+/i, /public domain/i, /\bcc0\b/i]
-
-export function isAllowedBoundaryLicense(license: string): boolean {
-  if (/sharealike|share-alike|-sa\b/i.test(license)) return false
-  return ALLOWED_LICENSE_PATTERNS.some((p) => p.test(license))
-}
 
 export function iso3ToIso2(iso3: string): string | null {
   return ISO3_TO_ISO2[iso3.toUpperCase()] ?? null
 }
 
-// CGAZ folds these into their sovereign country, but they have their own
-// ISO code (and currency), so the seed promotes them to country level.
+// CGAZ files these regions under their sovereign country, but they have
+// their own ISO code (and currency), so the seed gives them that code.
 export const TERRITORY_OVERRIDES: ReadonlyArray<{ parentIso2: string; name: string; iso2: string }> = [
   { parentIso2: "CN", name: "Hong Kong Special Administrative Region", iso2: "HK" },
   { parentIso2: "CN", name: "Macau Special Administrative Region", iso2: "MO" },
@@ -50,13 +38,7 @@ export const PhotonReverseSchema = z.object({
     .array(
       z.object({
         properties: z
-          .object({
-            countrycode: z.string().optional(),
-            state: z.string().optional(),
-            county: z.string().optional(),
-            city: z.string().optional(),
-            district: z.string().optional(),
-          })
+          .object({ countrycode: z.string().optional(), state: z.string().optional() })
           .passthrough(),
       })
     )
@@ -66,20 +48,13 @@ export const PhotonReverseSchema = z.object({
 export interface PhotonPlace {
   countryCode: string | null
   region: string | null
-  county: string | null
-  city: string | null
 }
 
 export function photonPlaceFromResponse(raw: unknown): PhotonPlace | null {
   const parsed = PhotonReverseSchema.safeParse(raw)
   const p = parsed.success ? parsed.data.features[0]?.properties : undefined
   if (!p) return null
-  return {
-    countryCode: p.countrycode ? p.countrycode.toUpperCase() : null,
-    region: p.state ?? null,
-    county: p.county ?? null,
-    city: p.city ?? p.district ?? null,
-  }
+  return { countryCode: p.countrycode ? p.countrycode.toUpperCase() : null, region: p.state ?? null }
 }
 
 const regionNames = new Intl.DisplayNames(["en"], { type: "region" })

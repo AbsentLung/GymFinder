@@ -8,8 +8,8 @@ import { queue } from "../queue/index.js"
 import { notifyRequestStatusChange } from "./push.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
 import { reverseGeocode, tryReverseGeocode, GeocoderUnavailableError } from "../geocode.js"
-import { findDeepestAreaAt } from "../area-queries.js"
-import { enqueueGymArea } from "./gym-area.js"
+import { findRegionAt } from "../region-queries.js"
+import { enqueueGymRegion } from "./gym-region.js"
 import { getFxRates } from "../fx.js"
 import { convertToUsdCents, isDuplicateMatch, looksLikeRealCoordinates, amountMinorToMajor, getCountryCurrency, COUNTRY_TO_CURRENCY } from "../lib.js"
 import type { ToolDef } from "../interfaces/llm.js"
@@ -362,7 +362,7 @@ export async function applyDecision(
       .where(eq(gymChanges.id, changeId))
   })
   // After commit, so the worker can see the new row.
-  if (createdGymId !== null) await enqueueGymArea(createdGymId)
+  if (createdGymId !== null) await enqueueGymRegion(createdGymId)
 
   const [change] = await db.select().from(gymChanges).where(eq(gymChanges.id, changeId))
   if (change?.requestId) await recomputeRequestStatus(change.requestId)
@@ -379,8 +379,8 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
   }
   if (proposed.kind === "add_gym") {
     const point = sql`ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326)`
-    // Set now so price currency is right before the gym-area job runs.
-    const countryCode = (await findDeepestAreaAt(proposed.lat, proposed.lng))?.countryCode ?? null
+    // Set now so price currency is right before the gym-region job runs.
+    const countryCode = (await findRegionAt(proposed.lat, proposed.lng))?.countryCode ?? null
     // Stamped so the weekly OSM refresh doesn't overwrite this for a year.
     // A plain `${proposed.categories}` drizzle-expands an empty array to
     // a bare "()", which Postgres rejects as a syntax error.
