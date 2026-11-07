@@ -98,7 +98,7 @@ flowchart LR
 
 `place` is added to:
 - `GET /v1/gyms/{id}`;
-- each change in `GET /v1/me/requests` / `GET /v1/requests/{id}`, together with `gymId` and `gymName`;
+- each change in `GET /v1/me/requests` / `GET /v1/requests/{id}`, together with `gymId` (the request-level `gymName` comes from #33);
 - each item in `GET /v1/admin/changes`, where it replaces the old live-Photon `locationLabel`.
 
 ```json
