@@ -8,6 +8,7 @@ import { gymPrices, reviews } from "../db/schema.js"
 import { requireUser, getSessionUser } from "../auth-guard.js"
 import { toLocalDisplayPrice } from "../lib.js"
 import { getFxRates } from "../fx.js"
+import { areaChainJsonSql, placeFromChain } from "../area-queries.js"
 
 interface GymDetailRow {
   [key: string]: unknown
@@ -26,12 +27,15 @@ interface GymDetailRow {
   rating: number | null
   review_count: number
   country_code: string | null
+  postcode: string | null
+  area_chain: unknown
 }
 
 async function fetchGymDetail(id: number) {
   const result = await db.execute<GymDetailRow>(sql`
     SELECT g.id, g.name, ST_X(g.location) AS lng, ST_Y(g.location) AS lat, g.address, g.description,
            g.categories, g.accepts_drop_in, g.has_trial, g.details, g.status, g.updated_at, g.country_code,
+           g.postcode, ${areaChainJsonSql(sql`g.area_id`)} AS area_chain,
            (SELECT avg(rating)::float FROM reviews WHERE gym_id = g.id) AS rating,
            (SELECT count(*)::int FROM reviews WHERE gym_id = g.id) AS review_count
     FROM gyms g WHERE g.id = ${id}
@@ -51,6 +55,7 @@ async function fetchGymDetail(id: number) {
     name: gym.name,
     location: { lat: Number(gym.lat), lng: Number(gym.lng) },
     address: gym.address,
+    place: placeFromChain(gym.area_chain, gym.postcode),
     categories: gym.categories ?? [],
     description: gym.description,
     acceptsDropIn: gym.accepts_drop_in,

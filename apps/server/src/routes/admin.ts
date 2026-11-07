@@ -6,6 +6,7 @@ import { db } from "../db/index.js"
 import { gymChanges, users } from "../db/schema.js"
 import { requireAdmin } from "../auth-guard.js"
 import { applyDecision } from "../jobs/bot-review.js"
+import { placeForChange } from "../area-queries.js"
 
 interface CurrentGymRow {
   [key: string]: unknown
@@ -83,6 +84,8 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
             gymId: row.gymId ? String(row.gymId) : null,
             proposed: row.proposed,
             currentGym,
+            // Stored names, never a live geocode (LOCATION_NAMES.md).
+            place: await placeForChange(row.gymId, row.proposed),
             evidence: row.evidence,
             reviewStatus: row.reviewStatus,
             decidedBy: row.decidedBy,

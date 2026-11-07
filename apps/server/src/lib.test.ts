@@ -251,24 +251,24 @@ describe("osmTagsToGymFields", () => {
   it("joins whichever addr:* parts are present", () => {
     expect(
       osmTagsToGymFields({ "addr:housenumber": "12", "addr:street": "Main St", "addr:city": "Springfield", "addr:postcode": "90210" })
-    ).toEqual({ address: "12 Main St, Springfield, 90210", description: null, categories: [] })
+    ).toEqual({ address: "12 Main St, Springfield, 90210", description: null, categories: [], postcode: "90210" })
   })
   it("still joins the parts that do exist when others are missing", () => {
-    expect(osmTagsToGymFields({ "addr:city": "Springfield" })).toEqual({ address: "Springfield", description: null, categories: [] })
+    expect(osmTagsToGymFields({ "addr:city": "Springfield" })).toEqual({ address: "Springfield", description: null, categories: [], postcode: null })
   })
   it("picks up a description tag when present", () => {
-    expect(osmTagsToGymFields({ description: " A great gym " })).toEqual({ address: null, description: "A great gym", categories: [] })
+    expect(osmTagsToGymFields({ description: " A great gym " })).toEqual({ address: null, description: "A great gym", categories: [], postcode: null })
   })
   it("maps a single sport tag to its category", () => {
-    expect(osmTagsToGymFields({ sport: "yoga" })).toEqual({ address: null, description: null, categories: ["Yoga"] })
+    expect(osmTagsToGymFields({ sport: "yoga" })).toEqual({ address: null, description: null, categories: ["Yoga"], postcode: null })
   })
   it("splits a semicolon-separated sport tag and maps each part", () => {
     const result = osmTagsToGymFields({ sport: "yoga;climbing" })
     expect(result.categories.sort()).toEqual(["Bouldering", "Yoga"])
   })
   it("returns all-empty defaults for no tags at all", () => {
-    expect(osmTagsToGymFields(null)).toEqual({ address: null, description: null, categories: [] })
-    expect(osmTagsToGymFields({})).toEqual({ address: null, description: null, categories: [] })
+    expect(osmTagsToGymFields(null)).toEqual({ address: null, description: null, categories: [], postcode: null })
+    expect(osmTagsToGymFields({})).toEqual({ address: null, description: null, categories: [], postcode: null })
   })
 })
 

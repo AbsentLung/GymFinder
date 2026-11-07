@@ -7,7 +7,9 @@ import { llm } from "../llm/index.js"
 import { queue } from "../queue/index.js"
 import { notifyRequestStatusChange } from "./push.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
-import { reverseGeocode, tryReverseGeocode, tryReverseGeocodeCountryCode, GeocoderUnavailableError } from "../geocode.js"
+import { reverseGeocode, tryReverseGeocode, GeocoderUnavailableError } from "../geocode.js"
+import { countryCodeAtSql } from "../area-queries.js"
+import { enqueueGymArea } from "./gym-area.js"
 import { getFxRates } from "../fx.js"
 import { convertToUsdCents, isDuplicateMatch, looksLikeRealCoordinates, amountMinorToMajor, getCountryCurrency, COUNTRY_TO_CURRENCY } from "../lib.js"
 import type { ToolDef } from "../interfaces/llm.js"
@@ -333,13 +335,14 @@ export async function applyDecision(
   changeId: number,
   decision: { reviewStatus: "approved" | "rejected"; decidedBy: "bot" | "admin"; evidence?: Record<string, unknown> }
 ): Promise<void> {
+  let createdGymId: number | null = null
   await db.transaction(async (tx) => {
     const [change] = await tx.select().from(gymChanges).where(eq(gymChanges.id, changeId))
     if (!change) throw new Error(`gym_changes ${changeId} not found`)
     const proposed = change.proposed as ProposedChange
 
     if (decision.reviewStatus === "approved") {
-      await applyProposedChange(tx, proposed, change.gymId, decision.decidedBy)
+      createdGymId = await applyProposedChange(tx, proposed, change.gymId, decision.decidedBy)
     } else if (proposed.kind === "price") {
       // A rejected price shouldn't linger as a visible "unverified" row
       // - it was written immediately on submission, so this takes it
@@ -358,32 +361,36 @@ export async function applyDecision(
       })
       .where(eq(gymChanges.id, changeId))
   })
+  // After commit, so the worker can see the new row.
+  if (createdGymId !== null) await enqueueGymArea(createdGymId)
 
   const [change] = await db.select().from(gymChanges).where(eq(gymChanges.id, changeId))
   if (change?.requestId) await recomputeRequestStatus(change.requestId)
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: number | null, decidedBy: "bot" | "admin"): Promise<void> {
+
+// Returns the new gym's id for an add_gym, else null.
+async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: number | null, decidedBy: "bot" | "admin"): Promise<number | null> {
   // A few migrated gym_changes rows predate this union and have no
   // `kind` - known gap, flagged rather than silently mishandled.
   if (!("kind" in proposed)) {
     throw new Error(`gym_changes row has a pre-Phase-5 proposed shape with no "kind" discriminator: ${JSON.stringify(proposed)}`)
   }
   if (proposed.kind === "add_gym") {
-    const countryCode = await tryReverseGeocodeCountryCode(proposed.lat, proposed.lng)
+    const point = sql`ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326)`
     // Stamped so the weekly OSM refresh doesn't overwrite this for a year.
     // A plain `${proposed.categories}` drizzle-expands an empty array to
     // a bare "()", which Postgres rejects as a syntax error.
     const categoriesSql = sql`ARRAY[${sql.join(proposed.categories.map((c) => sql`${c}`), sql`, `)}]::text[]`
     const inserted = await tx.execute(sql`
       INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial, name_location_decided_at, country_code)
-      VALUES (${proposed.name}, ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326),
+      VALUES (${proposed.name}, ${point},
         ${proposed.address ?? null}, ${proposed.description ?? null}, ${categoriesSql},
-        ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now(), ${countryCode})
+        ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now(), ${countryCodeAtSql(point)})
       RETURNING id
     `)
-    const newGymId = inserted.rows[0].id
+    const newGymId: number = inserted.rows[0].id
     for (const price of proposed.prices) {
       // Unverified on arrival, same as every other add_gym price.
       // Stored as USD always - local display is converted at read time.
@@ -394,12 +401,12 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
           ${usdCents}, ${price.sourceKind}, ${price.sourceUrl ?? null}, ${price.menuPostedOn ?? null})
       `)
     }
-    return
+    return newGymId
   }
 
   if (proposed.kind === "status") {
     await tx.execute(sql`UPDATE gyms SET status = ${proposed.newValue} WHERE id = ${gymId}`)
-    return
+    return null
   }
 
   if (proposed.kind === "field") {
@@ -412,16 +419,16 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
       await tx.execute(
         sql`UPDATE gyms SET categories = ARRAY[${sql.join(categories.map((c) => sql`${c}`), sql`, `)}]::text[] WHERE id = ${gymId}`
       )
-      return
+      return null
     }
     // Re-stamps name_location_decided_at - a fresh decision, respected
     // by the weekly OSM refresh for another year.
     if (proposed.field === "name") {
       await tx.execute(sql`UPDATE gyms SET name = ${proposed.newValue}, name_location_decided_at = now() WHERE id = ${gymId}`)
-      return
+      return null
     }
     await tx.execute(sql`UPDATE gyms SET ${sql.raw(column)} = ${proposed.newValue} WHERE id = ${gymId}`)
-    return
+    return null
   }
 
   // price: promote to the verified row, remove the now-superseded unverified
@@ -436,6 +443,7 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
       verified_by = EXCLUDED.verified_by, last_seen_at = now()
   `)
   await tx.execute(sql`DELETE FROM gym_prices WHERE gym_id = ${gymId} AND kind = ${proposed.priceKind} AND is_verified = false`)
+  return null
 }
 
 async function resolveUsdCents(amountMinor: number, currency: string): Promise<number> {

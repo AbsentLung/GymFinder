@@ -12,6 +12,7 @@ import { requireDescription, GYM_CATEGORIES, isFetchRowFresh, geohash5TilesCover
 import { NON_PRICE_FIELDS, createGymChange } from "../jobs/bot-review.js"
 import type { ProposedChange } from "../jobs/bot-review.js"
 import { checkRateLimit } from "../rate-limit.js"
+import { placeForChange } from "../area-queries.js"
 
 const BOT_REVIEW_DEADLINE_MS = 10 * 60 * 1000
 const SWEEP_DEADLINE_MS = 60 * 60 * 1000
@@ -106,11 +107,15 @@ async function serializeRequest(requestId: number) {
     result: request.result,
     failureReason: request.failureReason,
     gymName: await resolveGymName(request, changes),
-    changes: changes.map((c) => ({
-      id: String(c.id),
-      reviewStatus: c.reviewStatus,
-      reason: c.reviewStatus === "rejected" ? (c.evidence as { reason?: string } | null)?.reason ?? null : null,
-    })),
+    changes: await Promise.all(
+      changes.map(async (c) => ({
+        id: String(c.id),
+        reviewStatus: c.reviewStatus,
+        reason: c.reviewStatus === "rejected" ? (c.evidence as { reason?: string } | null)?.reason ?? null : null,
+        gymId: c.gymId ? String(c.gymId) : null,
+        place: await placeForChange(c.gymId, c.proposed),
+      }))
+    ),
   }
 }
 
