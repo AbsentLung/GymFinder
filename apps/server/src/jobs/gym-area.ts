@@ -6,7 +6,7 @@ import { db } from "../db/index.js"
 import { queue } from "../queue/index.js"
 import { checkRateLimit } from "../rate-limit.js"
 import { reverseGeocodePlace } from "../geocode.js"
-import { deepestAreaContainingSql } from "../area-queries.js"
+import { findDeepestAreaAt } from "../area-queries.js"
 import type { AreaLevel } from "../db/schema.js"
 import type { PhotonPlace } from "../areas.js"
 
@@ -24,17 +24,17 @@ export async function enqueueGymArea(gymId: number): Promise<void> {
 }
 
 export async function processGymArea({ gymId }: { gymId: number }): Promise<void> {
-  const point = sql`(SELECT location FROM gyms WHERE id = ${gymId})`
-  const updated = await db.execute<{ area_id: number | null }>(sql`
-    WITH m AS (SELECT id, country_code FROM areas WHERE id = ${deepestAreaContainingSql(point)})
-    UPDATE gyms SET
-      area_id = (SELECT id FROM m),
-      country_code = COALESCE((SELECT country_code FROM m), gyms.country_code)
-    WHERE gyms.id = ${gymId}
-    RETURNING area_id
+  const gym = await db.execute<{ lat: number; lng: number }>(sql`
+    SELECT ST_Y(location) AS lat, ST_X(location) AS lng FROM gyms WHERE id = ${gymId}
   `)
-  const row = updated.rows[0]
-  if (row && row.area_id === null) {
+  const coords = gym.rows[0]
+  if (!coords) return
+  const area = await findDeepestAreaAt(Number(coords.lat), Number(coords.lng))
+  await db.execute(sql`
+    UPDATE gyms SET area_id = ${area?.id ?? null}, country_code = COALESCE(${area?.countryCode ?? null}, country_code)
+    WHERE id = ${gymId}
+  `)
+  if (!area) {
     await queue.add(
       GYM_AREA_PHOTON_QUEUE,
       { gymId },

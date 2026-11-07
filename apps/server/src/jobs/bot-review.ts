@@ -8,7 +8,7 @@ import { queue } from "../queue/index.js"
 import { notifyRequestStatusChange } from "./push.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
 import { reverseGeocode, tryReverseGeocode, GeocoderUnavailableError } from "../geocode.js"
-import { countryCodeAtSql } from "../area-queries.js"
+import { findDeepestAreaAt } from "../area-queries.js"
 import { enqueueGymArea } from "./gym-area.js"
 import { getFxRates } from "../fx.js"
 import { convertToUsdCents, isDuplicateMatch, looksLikeRealCoordinates, amountMinorToMajor, getCountryCurrency, COUNTRY_TO_CURRENCY } from "../lib.js"
@@ -379,6 +379,8 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
   }
   if (proposed.kind === "add_gym") {
     const point = sql`ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326)`
+    // Set now so price currency is right before the gym-area job runs.
+    const countryCode = (await findDeepestAreaAt(proposed.lat, proposed.lng))?.countryCode ?? null
     // Stamped so the weekly OSM refresh doesn't overwrite this for a year.
     // A plain `${proposed.categories}` drizzle-expands an empty array to
     // a bare "()", which Postgres rejects as a syntax error.
@@ -387,7 +389,7 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
       INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial, name_location_decided_at, country_code)
       VALUES (${proposed.name}, ${point},
         ${proposed.address ?? null}, ${proposed.description ?? null}, ${categoriesSql},
-        ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now(), ${countryCodeAtSql(point)})
+        ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now(), ${countryCode})
       RETURNING id
     `)
     const newGymId: number = inserted.rows[0].id

@@ -4,25 +4,23 @@ import { db } from "./db/index.js"
 import { AREA_LEVELS } from "./db/schema.js"
 import { AREA_DEPTH, countryNameFromCode } from "./areas.js"
 
-export function areaDepthSql(levelColumn: SQL): SQL {
-  const cases = AREA_LEVELS.map((level) => sql`WHEN ${level} THEN ${AREA_DEPTH[level]}`)
-  return sql`(CASE ${levelColumn} ${sql.join(cases, sql` `)} END)`
-}
+const LEVELS_DEEPEST_FIRST = [...AREA_LEVELS].sort((a, b) => AREA_DEPTH[b] - AREA_DEPTH[a])
 
-// Deepest area whose polygon contains the point; the smallest one wins a
-// tie (a promoted territory like Hong Kong sits inside China's polygon).
-export function deepestAreaContainingSql(pointSql: SQL): SQL {
-  return sql`(
-    SELECT a.id FROM areas a
-    WHERE ST_Contains(a.geom, ${pointSql})
-    ORDER BY ${areaDepthSql(sql`a.level`)} DESC, ST_Area(a.geom) ASC
-    LIMIT 1
-  )`
-}
-
-// Set at insert so price currency is right before the gym-area job runs.
-export function countryCodeAtSql(pointSql: SQL): SQL {
-  return sql`(SELECT country_code FROM areas WHERE id = ${deepestAreaContainingSql(pointSql)})`
+// Deepest area whose polygon contains the point. One level at a time,
+// deepest first: small city/county polygons answer most lookups, so huge
+// country outlines are rarely tested. Smallest wins within a level (a
+// promoted territory like Hong Kong sits inside China's polygon).
+export async function findDeepestAreaAt(lat: number, lng: number): Promise<{ id: number; countryCode: string } | null> {
+  const point = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`
+  for (const level of LEVELS_DEEPEST_FIRST) {
+    const found = await db.execute<{ id: number; country_code: string }>(sql`
+      SELECT id, country_code FROM areas WHERE level = ${level} AND ST_Contains(geom, ${point})
+      ORDER BY ST_Area(geom) ASC LIMIT 1
+    `)
+    const row = found.rows[0]
+    if (row) return { id: Number(row.id), countryCode: row.country_code }
+  }
+  return null
 }
 
 // jsonb {level: name, ..., country_code} for an area and its ancestors -
@@ -59,8 +57,9 @@ export async function placeForGym(gymId: number): Promise<Place | null> {
 
 // For proposals with no gym row yet: a local indexed lookup, not geocoding.
 export async function placeAtPoint(lat: number, lng: number): Promise<Place> {
-  const point = sql`ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)`
-  const result = await db.execute<{ chain: unknown }>(sql`SELECT ${areaChainJsonSql(deepestAreaContainingSql(point))} AS chain`)
+  const area = await findDeepestAreaAt(lat, lng)
+  if (!area) return placeFromChain(null)
+  const result = await db.execute<{ chain: unknown }>(sql`SELECT ${areaChainJsonSql(sql`${area.id}::bigint`)} AS chain`)
   return placeFromChain(result.rows[0]?.chain)
 }
 

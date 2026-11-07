@@ -223,6 +223,7 @@ Gym details response:
   "name": "Bali Strength Club",
   "location": { "lat": -8.6501, "lng": 115.1385 },
   "address": "Jl. Raya Canggu 12",
+  "place": { "city": "Canggu", "region": "Bali", "county": "Badung", "country": "Indonesia", "countryCode": "ID", "postcode": "80361" },
   "categories": ["commercial"],
   "description": "...",
   "acceptsDropIn": true,
@@ -253,6 +254,13 @@ Gym details response:
 ```
 
 `prices` can hold a verified and an unverified price of the same kind; `verifiedBy: null` marks unverified ones. `openingHours` uses the OSM `opening_hours` format, which the app parses for "open now".
+
+**`place`** (also on request changes in 2.4 and admin items in 2.6) holds stored location names, read from our own `areas` boundaries, never geocoded at read time (LOCATION_NAMES.md). Every field can be `null`:
+- `city`, `region` (state / province / island) and `county` are the area names from walking up `gyms.area_id`.
+- `country` is the English name for `countryCode` (ISO 3166-1 alpha-2).
+- `postcode` is free text, only when a source had a structured one.
+
+`place` is all-null until the background fill job has run, or if no boundary or Photon match was found. The app shows `city, region, country` next to the address, or in its place when there is no address.
 
 ### 2.4 Requests: one shape for sweeps and gym changes (FR-11, FR-16, FR-18)
 
@@ -288,7 +296,7 @@ How requests are created, endpoint by endpoint or through one generic endpoint:
 | GET | `/v1/requests/{id}` | 🌐/🔒 | | Current status (polling). A signed-out sweep has no owner, so anyone holding its id can poll it - same "knowing the id is enough" shape as chat (2.4b). Every other request kind is 🔒, readable by the user who made it or an admin. |
 | POST | `/v1/requests/{id}/retry` | 🔒 | | Only for `failed` requests: creates a new request with the same input and returns it. Reached only from "My requests" (2.5), which is already 🔒, so a signed-out sweep is never retried this way. |
 
-`changes` lists the `gym_changes` a request produced, each with `reviewStatus` (`pending_bot`, `awaiting_admin`, `approved`, `rejected`) and a short reason when rejected. The status the user sees on "My requests" is derived (STACK_AND_SCHEMA.md 2.10): `failed` if the job failed, `pending` until every change is decided, then `completed` with counts.
+`changes` lists the `gym_changes` a request produced, each with `reviewStatus` (`pending_bot`, `awaiting_admin`, `approved`, `rejected`), a short reason when rejected, and `gymId`, `gymName` and `place` (see **`place`** below). An `add_gym` change that hasn't created a gym yet has `gymId: null`, the proposed name and the place at the proposed location. The status the user sees on "My requests" is derived (STACK_AND_SCHEMA.md 2.10): `failed` if the job failed, `pending` until every change is decided, then `completed` with counts.
 
 Deadlines: bot review ~10 minutes, sweeps ~1 hour (they drain slowly on purpose). The watchdog marks overdue requests `failed` with `failureReason: "timed_out"`.
 
@@ -315,7 +323,7 @@ Rate limited per user or IP. Useful facts in an answer become `gym_changes` for 
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | `/v1/admin/changes?reviewStatus=awaiting_admin&cursor=` | 🛡️ | Review queue, oldest first. Each item shows the proposed change, the current gym values side by side, the evidence (source, URL, menu photo date), and the bot's notes. |
+| GET | `/v1/admin/changes?reviewStatus=awaiting_admin&cursor=` | 🛡️ | Review queue, oldest first. Each item shows the proposed change, the current gym values side by side, the evidence (source, URL, menu photo date), the bot's notes and the gym's `place` (for an unapproved `add_gym`, the place at its proposed location). |
 | POST | `/v1/admin/changes/{id}/approve` | 🛡️ | Applies the change to `gyms` / `gym_prices` in one transaction, then invalidates the tile and gym caches. `409` if someone already decided it. |
 | POST | `/v1/admin/changes/{id}/reject` | 🛡️ | `{ reason }`, shown to the user. |
 | GET | `/v1/admin/changes?decidedBy=bot&cursor=` | 🛡️ | Spot-check what the bot auto-approved (e.g. seeded gyms). |

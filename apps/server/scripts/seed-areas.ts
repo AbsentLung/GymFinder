@@ -21,8 +21,7 @@ import { z } from "zod"
 import { db, pool } from "../src/db/index.js"
 import { config } from "../src/config.js"
 import { AREA_LEVELS, type AreaLevel } from "../src/db/schema.js"
-import { TERRITORY_OVERRIDES, decodeDbfText, iso3ToIso2, isAllowedBoundaryLicense } from "../src/areas.js"
-import { areaDepthSql } from "../src/area-queries.js"
+import { AREA_DEPTH, TERRITORY_OVERRIDES, decodeDbfText, iso3ToIso2, isAllowedBoundaryLicense } from "../src/areas.js"
 
 const CGAZ_BASE = "https://github.com/wmgeolab/geoBoundaries/raw/main/releaseData/CGAZ"
 const CGAZ_LEVELS: ReadonlyArray<{ adm: string; level: AreaLevel }> = [
@@ -205,23 +204,30 @@ async function promoteTerritories() {
   }
 }
 
-// Parent = the deepest shallower area containing a point inside the child.
-// Top-down, so a county under Hong Kong inherits HK, not China's CN.
+// Parent = the deepest shallower area containing a point inside the child,
+// tried one parent level at a time (nearest first) so huge country
+// outlines are only tested when nothing smaller matched. Top-down, so a
+// county under Hong Kong inherits HK, not China's CN.
 async function linkParents() {
-  const depth = (col: string) => areaDepthSql(sql.raw(col))
-  await db.execute(sql`
-    UPDATE areas SET parent_id = NULL WHERE level = 'country' AND source_ref IN (SELECT source_ref FROM areas_load)
-  `)
+  await db.execute(sql`UPDATE areas SET parent_id = NULL WHERE source_ref IN (SELECT source_ref FROM areas_load)`)
   for (const level of AREA_LEVELS.filter((l) => l !== "country")) {
+    await db.execute(sql`DROP TABLE IF EXISTS areas_link_points`)
     await db.execute(sql`
-      UPDATE areas c SET parent_id = (
-        SELECT p.id FROM areas p
-        WHERE p.id <> c.id AND ${depth("p.level")} < ${depth("c.level")} AND ST_Intersects(p.geom, ST_PointOnSurface(c.geom))
-        ORDER BY ${depth("p.level")} DESC, ST_Area(p.geom) ASC
-        LIMIT 1
-      )
-      WHERE c.level = ${level} AND c.source_ref IN (SELECT source_ref FROM areas_load)
+      CREATE UNLOGGED TABLE areas_link_points AS
+      SELECT a.id, ST_PointOnSurface(a.geom) AS pt FROM areas a
+      WHERE a.level = ${level} AND a.source_ref IN (SELECT source_ref FROM areas_load)
     `)
+    const parentLevels = AREA_LEVELS.filter((p) => AREA_DEPTH[p] < AREA_DEPTH[level]).sort((a, b) => AREA_DEPTH[b] - AREA_DEPTH[a])
+    for (const parentLevel of parentLevels) {
+      await db.execute(sql`
+        UPDATE areas c SET parent_id = (
+          SELECT p.id FROM areas p WHERE p.level = ${parentLevel} AND ST_Intersects(p.geom, lp.pt) ORDER BY ST_Area(p.geom) ASC LIMIT 1
+        )
+        FROM areas_link_points lp
+        WHERE c.id = lp.id AND c.parent_id IS NULL
+      `)
+    }
+    await db.execute(sql`DROP TABLE areas_link_points`)
     await db.execute(sql`
       UPDATE areas c SET country_code = p.country_code FROM areas p
       WHERE c.parent_id = p.id AND c.level = ${level} AND c.country_code <> p.country_code
