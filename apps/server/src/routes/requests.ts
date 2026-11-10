@@ -27,10 +27,7 @@ const MAX_BBOX_CELLS = 20
 const sweepBodySchema = z.union([
   z.object({ geohash: z.string().regex(GEOHASH5_PATTERN, "must be a 5-character geohash") }),
   z.object({
-    // geohash5TilesCoveringBbox enumerates every cell in the bbox before
-    // MAX_BBOX_CELLS trims it - reachable signed-out, so an unbounded
-    // bbox can block the event loop building millions of cells no one
-    // needed. 0.5 degrees covers a real viewport many times over.
+    // geohash5TilesCoveringBbox enumerates the whole bbox before MAX_BBOX_CELLS trims it.
     bbox: z
       .object({ minLat: z.number(), maxLat: z.number(), minLng: z.number(), maxLng: z.number() })
       .refine((b) => b.maxLat - b.minLat <= 0.5 && b.maxLng - b.minLng <= 0.5, "bbox span must be 0.5 degrees or less"),
@@ -243,10 +240,7 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const [row] = await db.select().from(requests).where(eq(requests.id, request.params.id))
       if (!row) return reply.status(404).send({ error: "Not found" })
-      // A signed-out sweep has no owner - knowing its id is enough (like
-      // chat). An add/update request's userId also goes null when its
-      // owner is deleted (onDelete: set null), but that one must stay
-      // private - only a sweep is meant to be public this way.
+      // Only a sweep is meant to be public when userId is null (a deleted owner leaves the same null on other kinds).
       const isPublicSweep = row.kind === "sweep" && row.userId === null
       if (!isPublicSweep) {
         const sessionUser = await getSessionUser(request)

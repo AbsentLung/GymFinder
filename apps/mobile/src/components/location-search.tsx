@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-// Photon is primary (search-as-you-type). Nominatim's 1 req/sec policy
-// rules it out as primary, and CLAUDE.md rules it out in production
-// entirely - it's a dev-only fallback when Photon is down.
+// Photon is primary; Nominatim is a dev-only fallback (CLAUDE.md bars it in production).
 const PHOTON_URL = 'https://photon.komoot.io/api/';
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const DEBOUNCE_MS = 300;
@@ -108,8 +106,6 @@ export function LocationSearch({
         setResults(await searchPhoton(query));
       } catch (photonError) {
         console.error('Photon search failed', photonError);
-        // CLAUDE.md: never use the public Nominatim server in production
-        // - its 1 req/sec policy can't take real traffic. Dev-only fallback.
         if (!__DEV__) {
           setResults([]);
         } else {
