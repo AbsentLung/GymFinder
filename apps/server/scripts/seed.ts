@@ -1,8 +1,4 @@
-// CLI seeding - reuses the same queue/workers/sources as a user sweep,
-// both at low priority so a real request jumps ahead.
-//
-// Resumable by construction: each tile's staleness is read fresh before
-// enqueueing, so a re-run only re-does tiles still stale.
+// CLI seeding - reuses the sweep queue at low priority; resumable since staleness is read fresh each run.
 //
 // Usage:
 //   DATABASE_URL=postgres://... npx tsx scripts/seed.ts --list destinations.json
