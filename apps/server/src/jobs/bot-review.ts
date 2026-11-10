@@ -60,6 +60,8 @@ interface ReviewResult {
   evidence: Record<string, unknown>
 }
 
+const NO_CONCLUSION_RESULT: ReviewResult = { reviewStatus: "awaiting_admin", evidence: { reason: "Couldn't reach a conclusion." } }
+
 const CONFIRM_PRICE_TOOL: ToolDef = {
   name: "confirm_price_finding",
   description:
@@ -178,10 +180,7 @@ async function verifyAddGym(change: ProposedChange & { kind: "add_gym" }): Promi
     return { reviewStatus: "approved", decidedBy: "bot", evidence: { reason: `Found on OpenStreetMap as "${osmMatch}" within 50m.` } }
   }
 
-  // Thrown (Photon unreachable) is NOT the same signal as null
-  // (Photon answered, found nothing) - an outage isn't evidence this
-  // location is impossible, so it goes to an admin instead of being
-  // auto-rejected.
+  // A thrown outage isn't evidence this location is impossible - goes to an admin, not auto-rejected.
   let location: string | null
   try {
     location = await reverseGeocode(change.lat, change.lng)
@@ -227,7 +226,7 @@ async function verifyFieldChangeForGym(
     messages: [{ role: "user", content: "Verify this proposed edit." }],
   })
   const toolUse = response.toolUses.find((t) => t.name === "confirm_text_edit")
-  if (!toolUse) return { reviewStatus: "awaiting_admin", evidence: { reason: "Couldn't reach a conclusion." } }
+  if (!toolUse) return NO_CONCLUSION_RESULT
 
   return toolUse.input.confirmed === true
     ? { reviewStatus: "approved", decidedBy: "bot", evidence: { reason: toolUse.input.reason } }
@@ -265,7 +264,7 @@ async function verifyPriceChange(
     messages: [{ role: "user", content: "Verify this proposed price." }],
   })
   const toolUse = response.toolUses.find((t) => t.name === "confirm_price_finding")
-  if (!toolUse) return { reviewStatus: "awaiting_admin", evidence: { reason: "Couldn't reach a conclusion." } }
+  if (!toolUse) return NO_CONCLUSION_RESULT
 
   const { price_amount, price_currency, source_kind, source_url, menu_posted_on, reason } = toolUse.input as {
     price_amount?: number

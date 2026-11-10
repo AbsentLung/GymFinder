@@ -128,14 +128,7 @@ export const gyms = pgTable(
       (): SQL => sql`left(ST_GeoHash(${gyms.location}, 5), 4)`
     ),
     categories: text("categories").array().notNull().default(sql`'{}'::text[]`),
-    // Real columns, not inside `details` - caught live (building the
-    // tiles route): API.md's own response shapes show both as top-level
-    // fields on every tile/gym-details response (2.2, 2.3), and
-    // `description` specifically gets truncated to ~300 chars for tiles,
-    // which wants a plain column, not a jsonb extraction. Phase 4's
-    // migration script was missing these entirely before this fix - a
-    // real silent data-loss bug, not just a schema gap, since nothing
-    // downstream ever read gyms.address/description from the old data.
+    // Real columns, not inside `details` - every response shape (API.md 2.2, 2.3) needs these top-level.
     address: text("address"),
     description: text("description"),
     // ISO 3166-1 alpha-2, from reverse-geocoding at creation. Drives
@@ -146,12 +139,7 @@ export const gyms = pgTable(
     // Opening hours, amenities, website, trial details, etc.
     details: jsonb("details"),
     status: text("status").notNull().default("active"),
-    // Stamped whenever an approved "name" field change or a brand-new
-    // gym is applied (bot-review.ts's applyProposedChange) - lets the
-    // weekly OSM refresh tell "nobody's ever confirmed this" from "an
-    // admin/bot already confirmed this, recently" and skip overwriting
-    // name/location in the second case. Null means OSM is still
-    // authoritative (never confirmed).
+    // Null means OSM is still authoritative; set on confirmation so the weekly refresh stops overwriting it.
     nameLocationDecidedAt: timestamp("name_location_decided_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

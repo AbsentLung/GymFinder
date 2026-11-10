@@ -25,11 +25,8 @@ export class PgBossQueue implements QueueInterface {
     await this.boss.stop()
   }
 
-  // `exclusive` is what makes singletonKey actually dedupe - pg-boss's
-  // default `standard` policy accepts it but enforces no uniqueness.
-  // But `exclusive` also serializes any queue with NO singletonKey to
-  // one job at a time, silently dropping the rest. Opt queues in here
-  // only once every `send` to them supplies a jobId.
+  // `exclusive` makes singletonKey actually dedupe, but drops any job sent without one - every
+  // `send` to a queue listed here must supply a jobId.
   private static readonly SINGLETON_QUEUES = new Set(["tile-refresh", "bot-review", "sweep", "research-gym"])
 
   private async ensureQueue(name: string) {
