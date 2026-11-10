@@ -40,6 +40,6 @@ yarn-error.*
 
 example
 
-# generated native folders
-/ios
-/android
+# generated native folders (apps/mobile/ now that it's a workspace, not just root)
+ios/
+android/

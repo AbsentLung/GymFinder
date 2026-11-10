@@ -1,0 +1,107 @@
+// Leaflet is DOM-only, so this runs inside a WebView's own DOM, talking
+// to the native side over postMessage. Deliberately dumb - just draws
+// circles and reports taps; all real logic stays in TypeScript.
+export const LEAFLET_WEBVIEW_HTML = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { margin: 0; padding: 0; height: 100%; width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    var map = L.map('map', { zoomControl: true }).setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+
+    var markerLayer = L.layerGroup().addTo(map);
+    var clickModeActive = false;
+
+    function post(message) {
+      // react-native-webview injects postMessage on window, not always elsewhere.
+      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(message));
+    }
+
+    map.on('click', function (e) {
+      if (clickModeActive) post({ type: 'mapClick', lat: e.latlng.lat, lng: e.latlng.lng });
+    });
+
+    var viewportTimer = null;
+    function sendViewportChanged() {
+      clearTimeout(viewportTimer);
+      viewportTimer = setTimeout(function () {
+        var b = map.getBounds();
+        post({
+          type: 'viewportChanged',
+          zoom: map.getZoom(),
+          bounds: { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() },
+        });
+      }, 150);
+    }
+    map.on('moveend', sendViewportChanged);
+    map.on('zoomend', sendViewportChanged);
+
+    // Touchscreen stand-in for the web map's hover prefetch - 'move' fires continuously during a drag.
+    var lastDragPrefetch = 0;
+    map.on('move', function () {
+      var now = Date.now();
+      if (now - lastDragPrefetch < 600) return;
+      lastDragPrefetch = now;
+      var c = map.getCenter();
+      post({ type: 'dragPrefetchPoint', lat: c.lat, lng: c.lng });
+    });
+
+    function handleMessage(raw) {
+      var msg;
+      try { msg = JSON.parse(raw); } catch (e) { return; }
+
+      if (msg.type === 'setView') {
+        map.setView([msg.lat, msg.lng], msg.zoom);
+      } else if (msg.type === 'setClickMode') {
+        clickModeActive = !!msg.active;
+      } else if (msg.type === 'setMarkers') {
+        markerLayer.clearLayers();
+        (msg.markers || []).forEach(function (m) {
+          var circle = L.circleMarker([m.lat, m.lng], {
+            radius: m.radius,
+            color: '#146C5F',
+            fillColor: m.color,
+            fillOpacity: m.isCluster ? 0.75 : 0.9,
+          });
+          if (m.tooltip) circle.bindTooltip(m.tooltip, { direction: 'top', offset: [0, -6] });
+          circle.on('click', function () {
+            if (m.isCluster) post({ type: 'clusterTap', clusterId: m.clusterId, lat: m.lat, lng: m.lng });
+            else post({ type: 'markerTap', id: m.id });
+          });
+          circle.addTo(markerLayer);
+        });
+      } else if (msg.type === 'setPendingPin') {
+        markerLayer.eachLayer(function (l) { if (l._isPendingPin) markerLayer.removeLayer(l); });
+        if (msg.lat != null) {
+          var pin = L.circleMarker([msg.lat, msg.lng], {
+            radius: 8,
+            color: '#B8860B',
+            fillColor: '#E0A500',
+            fillOpacity: 0.9,
+          });
+          pin._isPendingPin = true;
+          pin.bindTooltip('New gym (pending)', { direction: 'top', offset: [0, -6], permanent: true });
+          pin.addTo(markerLayer);
+        }
+      }
+    }
+
+    // Android delivers postMessage via document, iOS via window - listen on both.
+    document.addEventListener('message', function (e) { handleMessage(e.data); });
+    window.addEventListener('message', function (e) { handleMessage(e.data); });
+
+    post({ type: 'ready' });
+  </script>
+</body>
+</html>`
