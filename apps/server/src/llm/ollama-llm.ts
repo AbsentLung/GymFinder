@@ -24,14 +24,7 @@ export class OllamaLLM implements LLMInterface {
     return response.message.content
   }
 
-  // Caught live in the old demo (server/ai.js): a research turn that
-  // also calls find_website_on_google_maps (launches a real Playwright/
-  // Chromium browser) sometimes made the VERY NEXT ollama.chat() call
-  // fail outright with a raw "fetch failed" - real local-resource
-  // contention on an 8GB machine running a ~2GB model plus a briefly-
-  // torn-down Chromium instance, not a broken call. One retry with a
-  // short pause is the honest fix for that, not a code path that was
-  // ever actually wrong.
+  // A Chromium-launching tool call can starve the next ollama.chat() on a small machine - one retry.
   private async chatWithRetry(convo: Message[], ollamaTools: Tool[]) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {

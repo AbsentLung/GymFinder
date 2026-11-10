@@ -2,6 +2,15 @@ import Anthropic from "@anthropic-ai/sdk"
 import type { LLMInterface, ChatMessage, ToolDef, AgentTurnResult } from "../interfaces/llm.js"
 import { INTERCEPTED_TOOL_NAMES, runIntercepted } from "./tools.js"
 
+const MAX_TOKENS = 500
+
+function extractText(content: { type: string; text?: string }[]): string {
+  return content
+    .filter((b) => b.type === "text")
+    .map((b) => b.text ?? "")
+    .join("")
+}
+
 export class ClaudeLLM implements LLMInterface {
   private client: Anthropic
   private model: string
@@ -16,22 +25,14 @@ export class ClaudeLLM implements LLMInterface {
   async ask({ system, messages }: { system: string; messages: ChatMessage[] }): Promise<string> {
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: 500,
+      max_tokens: MAX_TOKENS,
       system,
       messages,
     })
-    return response.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("")
+    return extractText(response.content)
   }
 
-  // Ported from server/ai.js's runAnthropicTurn. Loops because fetch_url
-  // (and web_search, on this path) needs a real round trip: call the
-  // model, run whichever intercepted tool it asked for ourselves, feed
-  // the result back, let it continue. Stops as soon as the model
-  // produces any NON-intercepted tool call (a real finding for the
-  // caller) or no tool call at all.
+  // Loops to run any intercepted tool call ourselves and feed the result back; stops on a real finding.
   async runAgentTurn({
     system,
     tools,
@@ -41,11 +42,7 @@ export class ClaudeLLM implements LLMInterface {
     tools: ToolDef[]
     messages: ChatMessage[]
   }): Promise<AgentTurnResult> {
-    // Cast: ToolDef.inputSchema is a plain JSON-schema object (so the
-    // Ollama path - src/llm/ollama-llm.ts - can take the same ToolDef
-    // unchanged); every real inputSchema this app defines already has
-    // `type: "object"`, satisfying Anthropic's stricter InputSchema type
-    // at runtime even though the generic Record type doesn't prove it.
+    // Cast: every real inputSchema here already has `type: "object"`, satisfying Anthropic's stricter type.
     const anthropicTools = tools.map((t) => ({
       name: t.name,
       description: t.description,
@@ -57,15 +54,12 @@ export class ClaudeLLM implements LLMInterface {
     for (let round = 0; round < 4; round++) {
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: 500,
+        max_tokens: MAX_TOKENS,
         system,
         ...(anthropicTools.length ? { tools: anthropicTools } : {}),
         messages: convo,
       })
-      const text = response.content
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("")
+      const text = extractText(response.content)
       const toolUseBlocks = response.content.filter((b) => b.type === "tool_use")
       const otherUses = toolUseBlocks.filter((b) => !INTERCEPTED_TOOL_NAMES.has(b.name))
       const interceptedUses = toolUseBlocks.filter((b) => INTERCEPTED_TOOL_NAMES.has(b.name))
