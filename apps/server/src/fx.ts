@@ -24,9 +24,7 @@ export async function getFxRates(): Promise<Record<string, number>> {
 
     return data.rates as Record<string, number>
   } catch (e) {
-    // Every tile/gym-details read converts prices through this - an
-    // outage after the cache expires would otherwise 500 every one of
-    // them. A stale rate is still far better than no rate at all.
+    // A stale rate beats a 500 on every price read.
     if (row) return row.rates as Record<string, number>
     throw e
   }

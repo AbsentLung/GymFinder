@@ -16,21 +16,12 @@ import { chatRoutes } from "./routes/chat.js"
 import { meRoutes } from "./routes/me.js"
 
 export async function buildApp() {
-  // Behind a real proxy/CDN, request.ip is otherwise the proxy's own
-  // address - every signed-out caller would share one sweep rate-limit
-  // bucket. Matches auth.ts's trustedOrigins reasoning for NODE_ENV.
+  // Without this, request.ip is the proxy's address behind a real CDN.
   const app = Fastify({ logger: true, trustProxy: process.env.NODE_ENV === "production" })
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
-  // credentials: true is needed for the web app's session cookie to
-  // travel cross-origin at all - `origin: true` (reflect any origin)
-  // used to be paired with it, which lets any website make credentialed
-  // calls to every /v1 route once the cookie ever becomes SameSite=None.
-  // Same allow-list as auth.ts's trustedOrigins instead.
-  // methods defaults to GET,HEAD,POST only - every PUT/PATCH/DELETE route
-  // (promote-to-admin, edit-my-review, unlink-push-token, delete-account)
-  // would silently fail preflight on web otherwise, with no request ever
-  // reaching the server to show up in a log.
+  // Same allow-list as auth.ts's trustedOrigins; methods must be listed
+  // explicitly or PUT/PATCH/DELETE routes fail preflight silently.
   await app.register(cors, {
     origin: ["travelapp://", config.webOrigin, ...(process.env.NODE_ENV !== "production" ? [/^exp:\/\//] : [])],
     credentials: true,
