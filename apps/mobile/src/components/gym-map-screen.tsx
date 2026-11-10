@@ -249,11 +249,23 @@ export default function MapScreen() {
         )
       );
       const completed = settled.filter((r): r is GymRequest => r != null);
-      const totalNew = completed.reduce((sum, r) => sum + ((r.result as { gymsNew?: number } | null)?.gymsNew ?? 0), 0);
       if (completed.length === 0) {
         setFindMoreMessage('Something went wrong - try again?');
       } else {
-        setFindMoreMessage(totalNew > 0 ? `Found ${totalNew} new gym(s).` : 'No new gyms found here.');
+        // pollRequest gives up after 60s and hands back whatever it has -
+        // still 'pending' there means the sweep's still running, not that
+        // it found nothing.
+        const stillPending = completed.filter((r) => r.status === 'pending').length;
+        const totalNew = completed.reduce((sum, r) => sum + ((r.result as { gymsNew?: number } | null)?.gymsNew ?? 0), 0);
+        if (stillPending > 0) {
+          setFindMoreMessage(
+            totalNew > 0
+              ? `Found ${totalNew} new gym(s) so far - ${stillPending} area(s) still scanning. Check My Requests shortly.`
+              : `${stillPending} area(s) are still scanning - check My Requests shortly.`
+          );
+        } else {
+          setFindMoreMessage(totalNew > 0 ? `Found ${totalNew} new gym(s).` : 'No new gyms found here.');
+        }
         geohash5TilesCoveringBbox(bbox).forEach((cell) => fetchedTilesRef.current.delete(cell.slice(0, 4)));
         loadTiles({ suppressNudge: true });
       }
