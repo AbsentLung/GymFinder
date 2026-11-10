@@ -99,7 +99,7 @@ Keeping caches fresh after an admin approves a change:
 | Variation | Pros | Cons |
 |---|---|---|
 | Long cache time, never purge | Most cache hits. | An approved change can take hours to show up. |
-| **Short CDN cache (`s-maxage=600`) + a CloudFront invalidation of that one tile when a change is approved** | Approved changes appear within seconds; tiles nobody changes stay cached. At our volume, invalidations are within CloudFront's free monthly allowance. | One more AWS call on approval (behind the cache interface, so demo mode without CloudFront just skips it). |
+| **Short CDN cache (`s-maxage=600`) + a CDN purge of that one tile when a change is approved** (Cloudflare purge by URL in demo mode, CloudFront invalidation in scale mode) | Approved changes appear within seconds; tiles nobody changes stay cached. At our volume, purges are within both CDNs' free allowances. | One more CDN call on approval (behind the CDN interface). |
 | Versioned URLs (`/tiles/{gh}?v=17`) from a version list the app downloads first | Perfect caching, no purges. | Extra request and a version list to keep in sync; complex for little gain. |
 
 **Recommendation: short cache times plus a per-tile invalidation on approval.** The tile response also carries an `ETag`, so a browser or the app can revalidate with `If-None-Match` and get a tiny `304` when nothing changed.
@@ -136,7 +136,7 @@ Stale tiles: if a tile has never been fetched from Overpass, or the fetch is old
 ### 1.7 What the app calls directly, not through our API
 
 - **Photon** for location search (CLAUDE.md). It's a public geocoder built for search-as-you-type, and routing it through us only adds latency. If we ever self-host Photon, only its base URL changes.
-- **Base map tiles** (Protomaps PMTiles) straight from CloudFront/S3.
+- **Base map tiles** (Protomaps PMTiles) straight from the CDN (Cloudflare R2 in demo mode, S3 + CloudFront in scale mode).
 - Overpass and Google Maps are **never** called by the app; only our workers call them.
 
 ---

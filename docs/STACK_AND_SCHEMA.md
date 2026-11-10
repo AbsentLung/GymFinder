@@ -93,34 +93,45 @@ The demo server has its own sign-up with bcrypt + JWT. A real app needs password
 
 **Recommendation: Better Auth.** It keeps the "no lock-in, data in Postgres" principle and saves writing security code. Cognito is the fallback if Joey prefers everything AWS-managed.
 
-### 1.5 AWS hosting: demo mode
+### 1.5 Hosting: demo mode
 
-Goal: one cheap server, no paid managed services beyond small fixed costs.
+Goal: run the whole demo for about $0, on one server, with no paid managed services. **Decided by Joey (2026-11-07): Oracle Cloud Always Free VM + Cloudflare**, replacing the earlier Lightsail + S3/CloudFront plan (kept below as the fallback).
 
 ```mermaid
 flowchart TB
-    U([Expo app<br/>Web / Android / iOS]) --> CF[CloudFront CDN<br/>web app, gym tiles, base map]
-    CF --> S3[(S3<br/>web build, base map PMTiles)]
-    CF --> LS
-    subgraph LS[Lightsail instance, Docker Compose]
+    U([Expo app<br/>Web / Android / iOS]) --> CF[Cloudflare free CDN<br/>gym tiles, API]
+    U --> CP[Cloudflare Pages<br/>web build, /.well-known files]
+    U --> R2[(Cloudflare R2<br/>base map PMTiles)]
+    CF --> VM
+    subgraph VM[Oracle Always Free ARM VM, Docker Compose]
         API[API process]
         WK[Worker process<br/>pg-boss consumers, Playwright]
         PG[(Postgres + PostGIS<br/>+ pg-boss tables)]
     end
-    WK --> OL[Ollama<br/>Joey's PC via tunnel,<br/>or small model on the box]
-    PG -. nightly pg_dump .-> S3B[(S3 backups)]
+    WK --> OL[Ollama<br/>Joey's PC via Cloudflare Tunnel]
+    PG -. nightly pg_dump .-> R2B[(R2 backups)]
 ```
+
+**Server, database and workers**
 
 | Variation | Monthly cost (rough) | Pros | Cons |
 |---|---|---|---|
-| **Lightsail instance (4 GB)**, Postgres in Docker on the box | ~$24 | Fixed price incl. bandwidth and a static IP; simplest. | Database on the same box; we do backups ourselves (nightly `pg_dump` to S3). |
-| Lightsail 2 GB | ~$12 | Cheapest that runs Postgres + API + worker. | Too small for Playwright + Ollama on the box. |
-| EC2 t4g.small/medium + EBS | ~$15–30 | Same building block scale mode can grow from; ARM is cheap. | Bandwidth, IP and disk billed separately; more knobs. |
-| EC2 + RDS (db.t4g.micro) | ~$30–45 | Managed backups from day one; moving to scale mode is easier. | RDS roughly doubles the demo bill for a database that has almost no load. |
+| **Oracle Cloud Always Free ARM VM** (VM.Standard.A1.Flex, 2 OCPU, 12 GB, 200 GB disk, 10 TB egress), Postgres in Docker on the box | $0 | Free; more RAM than Lightsail 4 GB; Playwright/Chromium runs on ARM. | Oracle cut the allowance from 4 CPU / 24 GB to 2 / 12 in June 2026 without notice, so terms can change. Idle VMs (CPU, network *and* memory all under 20% for 7 days) may be reclaimed; Postgres + workers should keep memory above that. Sign-up needs a card check; free capacity can run out in some regions (the home region can't be changed later). |
+| Lightsail 4 GB (fallback) | ~$24 | Fixed price incl. bandwidth and a static IP; simple and reliable. | Costs money for a demo with almost no load. |
+| Lightsail 2 GB | ~$12 | Cheapest Lightsail that runs Postgres + API + worker. | Tight with Chromium on the box. |
+| Hetzner ARM VM (CAX21, 4 CPU, 8 GB) | ~€7–8 | Cheap and reliable. | Not free; another provider. |
+| Free managed Postgres (Supabase 500 MB, Neon 1 GB per project) + a free VM | $0 | Managed backups. | Too small for the `areas` boundary polygons. Neon caps compute at 100 CU-hours/month and pg-boss polling keeps it awake, so it runs out mid-month. Supabase pauses idle projects. |
+| Google Cloud e2-micro, Render/Railway/Fly.io free tiers | $0 | Free. | e2-micro has 1 GB RAM, too small for Chromium + Postgres; the others have no free tier that stays on. |
 
-New AWS accounts get starter credits for the first months, which cover most of this at the start.
+**Static files and CDN**
 
-**Recommendation: one Lightsail instance (4 GB) running Docker Compose**, Postgres+PostGIS in a container with nightly backups to S3, and S3 + CloudFront for the web build, base map and public gym tiles. DNS on Route 53 so it's all in one account.
+| Variation | Monthly cost (rough) | Pros | Cons |
+|---|---|---|---|
+| **Cloudflare Pages (web build) + R2 (base map) + free Cloudflare CDN in front of the API** | ~$0–2 (R2 is free up to 10 GB, then ~$0.015/GB; the world PMTiles file is ~120 GB, so ~$1.70) | Unlimited bandwidth, free egress from R2, custom headers (needed for the universal/app-link files under `/.well-known/`), purge by URL on the free plan. | One more provider; scale mode uses CloudFront, so the CDN purge sits behind an interface. |
+| GitHub Pages | $0 | Free. | 1 GB site limit (can't hold the base map), no custom headers, static only. |
+| S3 + CloudFront (earlier plan, scale mode) | ~$3 (mostly storing the base map) | Same as scale mode; one AWS account. | Costs a little more; demo then needs an AWS account anyway. |
+
+**Decided (Joey, 2026-11-07): one Oracle Always Free ARM VM running Docker Compose** (API, workers, Postgres + PostGIS, Playwright), with nightly `pg_dump` backups to R2; **Cloudflare Pages** for the web build, **R2** for the base map and **Cloudflare's free CDN** for the API and gym tiles; DNS on Cloudflare. Ollama stays on Joey's PC via Cloudflare Tunnel. If Oracle reclaims the VM or cuts the allowance again, the same Compose file moves to a Lightsail 4 GB instance (restore the latest backup from R2). Moving to scale mode is the same work from either box: restore a dump into RDS and deploy with CDK.
 
 #### Ollama on AWS: the expensive part
 
@@ -160,7 +171,7 @@ flowchart TB
 | Secrets/config | SSM Parameter Store, Secrets Manager | **SSM Parameter Store** (free for standard params); env vars injected into containers. Never in git. |
 | Logs/errors | CloudWatch Logs, + Sentry | **CloudWatch for logs, Sentry free tier for app + server errors** (it has an Expo SDK). |
 
-Scale mode with the smallest sizes is very roughly **$150–300/month** before Claude usage (ALB, two Fargate services, small RDS, small ElastiCache, NAT). That's why demo mode stays on Lightsail until there are paying users.
+Scale mode with the smallest sizes is very roughly **$150–300/month** before Claude usage (ALB, two Fargate services, small RDS, small ElastiCache, NAT). That's why demo mode stays on the free Oracle VM until there are paying users.
 
 ### 1.7 Map rendering and base map tiles
 
@@ -172,11 +183,11 @@ Today (vibe-coded demo, same code on `GymFinder` and `GymFinderVibeCoded`) the a
 
 | Variation | Pros | Cons |
 |---|---|---|
-| **MapLibre** (maplibre-gl-js on web, maplibre-react-native on mobile) + **Protomaps** vector tiles as one PMTiles file on S3 + CloudFront | Real native map on phones (smooth pan/zoom, many markers), same style on all platforms. Self-hosted base map costs only S3 + CloudFront transfer; no per-view fees. | Needs an Expo dev build (no Expo Go) for the native map module. Rewrite of the map screens. |
+| **MapLibre** (maplibre-gl-js on web, maplibre-react-native on mobile) + **Protomaps** vector tiles as one PMTiles file (Cloudflare R2 in demo, S3 + CloudFront in scale) | Real native map on phones (smooth pan/zoom, many markers), same style on all platforms. Self-hosted base map costs only storage (R2 has free egress); no per-view fees. | Needs an Expo dev build (no Expo Go) for the native map module. Rewrite of the map screens. |
 | Keep Leaflet / WebView, switch base tiles to a provider (MapTiler, Stadia, Thunderforest) | No rewrite; just change the tile URL. | WebView map feels sluggish on mobile with many markers. Provider free tiers are small; per-view fees grow with users. |
 | react-native-maps (Apple/Google maps) + Leaflet/MapLibre on web | Native look on each platform. | Two different map libraries to maintain; Google Maps SDK has its own usage costs and terms. |
 
-**Recommendation: MapLibre + self-hosted Protomaps on S3/CloudFront.** **Decided by Joey (2026-11-02): the vibe-coded app's UI stays as it is**, including the right sidebar's collapsible sections (e.g. trial), filters and panels. Only the map underneath changes; pins, clusters and controls should look and behave as they do today. As a quick first step before the rewrite, point Leaflet at the same Protomaps tiles (or a provider) so we stop using the OSM servers.
+**Recommendation: MapLibre + self-hosted Protomaps (R2 in demo, S3/CloudFront in scale).** **Decided by Joey (2026-11-02): the vibe-coded app's UI stays as it is**, including the right sidebar's collapsible sections (e.g. trial), filters and panels. Only the map underneath changes; pins, clusters and controls should look and behave as they do today. As a quick first step before the rewrite, point Leaflet at the same Protomaps tiles (or a provider) so we stop using the OSM servers.
 
 ### 1.8 Getting results back to the app (chat, request status)
 
@@ -210,10 +221,10 @@ Decided in PR #6: sweeps scrape Google Maps, behind the pluggable source interfa
 | Queue | pg-boss (demo) / BullMQ on Redis (scale) behind one interface |
 | DB access | Drizzle ORM + drizzle-kit migrations |
 | Auth | Better Auth, users in our Postgres (Cognito as fallback) |
-| Demo hosting | Lightsail 4 GB + Docker Compose; S3 + CloudFront + Route 53 |
+| Demo hosting | Oracle Always Free ARM VM + Docker Compose; Cloudflare Pages, R2 and CDN; Lightsail 4 GB as fallback (decided 2026-11-07) |
 | Scale hosting | ECS Fargate, RDS Postgres, ElastiCache, CDK, SSM, CloudWatch + Sentry |
 | LLM | Ollama on Joey's PC via tunnel (demo); Claude via API or Bedrock (scale) |
-| Map | MapLibre + Protomaps on S3/CloudFront |
+| Map | MapLibre + Protomaps (R2 in demo, S3/CloudFront in scale) |
 | Results to app | Polling, SSE for chat, Expo push for status changes |
 | Scraper | Playwright in sweep workers, never paid proxies (decided) |
 
@@ -545,5 +556,6 @@ Nothing in the vibe-coded data is lost: section 2.14's one-off script copies it 
 - **R-trees (2.3):** GIST (R-tree) + `geohash5` as recommended.
 
 - **Map (1.7):** MapLibre + self-hosted Protomaps, done together with the switch to geohash tile loading (about 1,000 of the ~2,400 map-screen lines change; needs an Expo development build).
+- **Demo hosting (1.5), changed 2026-11-07:** Oracle Cloud Always Free ARM VM + Cloudflare Pages/R2/CDN instead of Lightsail + S3/CloudFront, to bring the demo to ~$0. Lightsail 4 GB is the fallback. Scale hosting (1.6) is unchanged.
 
 Nothing is still open. The next doc is the API (endpoints, tile URLs and cache headers, request polling).

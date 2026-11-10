@@ -56,9 +56,9 @@ These were agreed with Joey. Follow them unless he changes them; update this fil
 - Parse and build these URLs in one shared helper so web, Share and deep links agree.
 
 ### Hosting
-- AWS (decided by Joey 2026-10-31; replaces the earlier Netlify + GCP e2-micro idea).
-- Demo mode stays near-free on a single small instance; scale mode moves to managed AWS services. Demo: Lightsail + Docker Compose, S3 + CloudFront + Route 53. Scale: ECS Fargate, RDS Postgres, ElastiCache, AWS CDK. See docs/STACK_AND_SCHEMA.md.
-- Keep config in env vars and keep AWS-specific code behind interfaces, so services can be swapped.
+- Scale mode runs on AWS (decided by Joey 2026-10-31): ECS Fargate, RDS Postgres, ElastiCache, S3 + CloudFront, AWS CDK.
+- Demo mode runs for ~$0 (decided by Joey 2026-11-07; replaces the earlier Lightsail + S3/CloudFront plan): one Oracle Cloud Always Free ARM VM (2 CPU, 12 GB) running Docker Compose (API, workers, Postgres + PostGIS, Playwright); Cloudflare Pages for the web build, Cloudflare R2 for the base map PMTiles and nightly database backups, Cloudflare's free CDN in front of the API. Fallback if Oracle reclaims the VM or cuts the free allowance: the same Compose setup on a Lightsail 4 GB instance. Don't use free managed Postgres (Supabase/Neon): too small for the `areas` boundaries and pg-boss keeps them awake. See docs/STACK_AND_SCHEMA.md 1.5.
+- Keep config in env vars and keep provider-specific code (AWS, Oracle, Cloudflare, e.g. CDN purges and backup storage) behind interfaces, so services can be swapped.
 
 ### Stack and schema (decided 2026-11-01/02, details in docs/STACK_AND_SCHEMA.md)
 - TypeScript everywhere: Fastify API + workers, npm-workspaces monorepo, Zod schemas shared with the app. Drizzle ORM + migrations. Better Auth (users in our Postgres): email, Google and Facebook at launch; add Sign in with Apple before the iOS App Store release (Apple requires it).
