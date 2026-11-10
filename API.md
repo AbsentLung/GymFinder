@@ -124,7 +124,7 @@ Stale tiles: if a tile has never been fetched from Overpass, or the fetch is old
 | Topic | Convention |
 |---|---|
 | IDs | Bigints in the database, **sent as strings in JSON** (`"id": "123"`). JavaScript loses precision above 2^53, and strings let us switch to UUIDs later without changing the app. |
-| Money | `{ "amountMinor": 15000, "currency": "IDR", "usdCents": 95 }`: original amount and currency, plus a USD snapshot for sorting. The app shows the original currency. |
+| Money | `{ "amountMinor": 15000, "currency": "IDR", "usdCents": 95 }`. **Decided by Joey (2026-11-04): stored as USD always** (`gym_prices.amountMinor` = `usdCents`) - a weaker demo-mode LLM mislabeling a found currency no longer corrupts the stored amount. `currency`/`amountMinor` in a response are converted from `usdCents` at read time into the gym's own country's currency (`lib.ts`'s `toLocalDisplayPrice`, rounded to ~2 significant figures) and are display-only - never write them back as the source of truth. |
 | Times | ISO 8601 UTC strings. |
 | Field names | camelCase in JSON, snake_case in the database (Drizzle maps them). |
 | Lists | Cursor pagination: `?limit=20&cursor=...` → `{ items, nextCursor }`. Offsets break when rows are added while scrolling. |
@@ -282,11 +282,11 @@ How requests are created, endpoint by endpoint or through one generic endpoint:
 
 | Method | Path | Who | Body | What happens |
 |---|---|---|---|---|
-| POST | `/v1/sweeps` | 🔒 | `{ geohash }` or `{ bbox }` (split into geohash5 tiles, capped count) | Sweep job per tile (FR-11). A tile swept recently returns `200` with an already-`completed` request; a tile already queued attaches to the existing job (same request returned). `result: { gymsFound, gymsNew }`. |
+| POST | `/v1/sweeps` | 🌐 | `{ geohash }` or `{ bbox }` (split into geohash5 tiles, capped count) | Sweep job per tile (FR-11, FR-15, FR-22) - the one request kind that doesn't need an account. Signed in or not, rate limited per user or per IP (section 1.6). A tile swept recently returns `200` with an already-`completed` request; a tile already queued attaches to the existing job (same request returned). `result: { gymsFound, gymsNew }`. Each new gym also gets a low-priority `research-gym` job queued (FR-31) - it only has a name/location at this point. |
 | POST | `/v1/gyms` | 🔒 | Proposed new gym: name, location, categories, prices with `sourceKind` / `sourceUrl` / `menuPostedOn`, ... | Add-gym request (FR-16). One `gym_changes` row, then bot review. |
 | POST | `/v1/gyms/{id}/changes` | 🔒 | Partial update with evidence for any price | Update-gym request (FR-16). |
-| GET | `/v1/requests/{id}` | 🔒 | | Current status (polling). Readable by the user who made it, or an admin. |
-| POST | `/v1/requests/{id}/retry` | 🔒 | | Only for `failed` requests: creates a new request with the same input and returns it. |
+| GET | `/v1/requests/{id}` | 🌐/🔒 | | Current status (polling). A signed-out sweep has no owner, so anyone holding its id can poll it - same "knowing the id is enough" shape as chat (2.4b). Every other request kind is 🔒, readable by the user who made it or an admin. |
+| POST | `/v1/requests/{id}/retry` | 🔒 | | Only for `failed` requests: creates a new request with the same input and returns it. Reached only from "My requests" (2.5), which is already 🔒, so a signed-out sweep is never retried this way. |
 
 `changes` lists the `gym_changes` a request produced, each with `reviewStatus` (`pending_bot`, `awaiting_admin`, `approved`, `rejected`) and a short reason when rejected. The status the user sees on "My requests" is derived (STACK_AND_SCHEMA.md 2.10): `failed` if the job failed, `pending` until every change is decided, then `completed` with counts.
 

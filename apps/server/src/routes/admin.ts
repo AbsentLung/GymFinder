@@ -1,13 +1,49 @@
-// API.md 2.6 - the admin review queue for gym_changes awaiting_admin,
-// plus a spot-check view of what the bot auto-approved, plus role
-// promotion (replacing the demo's removed "apply to be admin" flow).
+// Admin review queue for gym_changes, plus role promotion.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
-import { and, asc, eq, gt } from "drizzle-orm"
+import { and, desc, eq, lt, sql } from "drizzle-orm"
 import { db } from "../db/index.js"
-import { gyms, gymChanges, users } from "../db/schema.js"
+import { gymChanges, users } from "../db/schema.js"
 import { requireAdmin } from "../auth-guard.js"
 import { applyDecision } from "../jobs/bot-review.js"
+
+interface CurrentGymRow {
+  [key: string]: unknown
+  id: number
+  name: string
+  lat: number
+  lng: number
+  address: string | null
+  description: string | null
+  categories: string[]
+  accepts_drop_in: boolean | null
+  has_trial: boolean | null
+  status: string
+}
+
+// Raw SQL, not db.select().from(gyms) - the point customType's
+// fromDriver hands back raw EWKB hex, not {lat, lng}. Same ST_X/ST_Y
+// extraction tiles.ts and gyms.ts already use.
+async function fetchCurrentGym(gymId: number) {
+  const result = await db.execute<CurrentGymRow>(sql`
+    SELECT id, name, ST_Y(location) AS lat, ST_X(location) AS lng, address, description,
+           categories, accepts_drop_in, has_trial, status
+    FROM gyms WHERE id = ${gymId}
+  `)
+  const gym = result.rows[0]
+  if (!gym) return null
+  return {
+    id: gym.id,
+    name: gym.name,
+    location: { lat: Number(gym.lat), lng: Number(gym.lng) },
+    address: gym.address,
+    description: gym.description,
+    categories: gym.categories ?? [],
+    acceptsDropIn: gym.accepts_drop_in,
+    hasTrial: gym.has_trial,
+    status: gym.status,
+  }
+}
 
 export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
@@ -24,27 +60,29 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const { reviewStatus, decidedBy, cursor } = request.query
+      // Newest first - a just-submitted change should never need paging
+      // through the whole decided backlog to find.
       const conditions = [
         ...(reviewStatus ? [eq(gymChanges.reviewStatus, reviewStatus)] : []),
         ...(decidedBy ? [eq(gymChanges.decidedBy, decidedBy)] : []),
-        ...(cursor ? [gt(gymChanges.id, cursor)] : []),
+        ...(cursor ? [lt(gymChanges.id, cursor)] : []),
       ]
       const rows = await db
         .select()
         .from(gymChanges)
         .where(conditions.length ? and(...conditions) : undefined)
-        .orderBy(asc(gymChanges.id))
+        .orderBy(desc(gymChanges.id))
         .limit(20)
 
       const items = await Promise.all(
         rows.map(async (row) => {
-          const [gym] = row.gymId ? await db.select().from(gyms).where(eq(gyms.id, row.gymId)) : []
+          const currentGym = row.gymId ? await fetchCurrentGym(row.gymId) : null
           return {
             id: String(row.id),
             requestId: row.requestId ? String(row.requestId) : null,
             gymId: row.gymId ? String(row.gymId) : null,
             proposed: row.proposed,
-            currentGym: gym ?? null,
+            currentGym,
             evidence: row.evidence,
             reviewStatus: row.reviewStatus,
             decidedBy: row.decidedBy,

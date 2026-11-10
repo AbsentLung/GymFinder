@@ -1,15 +1,15 @@
-// CLAUDE.md: Photon only - never the public Nominatim server, not even
-// as a fallback.
-//
-// GeocoderUnavailableError (Photon didn't answer) is kept distinct from
-// a plain null (Photon answered, found nothing - the "likely in the
-// sea" signal FR-26 means) - an outage isn't evidence of anything.
+// Server-side decision input - Photon only, no Nominatim fallback here.
+// GeocoderUnavailableError (outage) stays distinct from a plain null
+// (Photon answered, found nothing - FR-26's "likely in the sea" signal).
 export class GeocoderUnavailableError extends Error {}
+
+// A slow Photon response once held a DB transaction open with no bound.
+const PHOTON_TIMEOUT_MS = 3000
 
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   let res: Response
   try {
-    res = await fetch(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}&lang=en`)
+    res = await fetch(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}&lang=en`, { signal: AbortSignal.timeout(PHOTON_TIMEOUT_MS) })
   } catch (e) {
     throw new GeocoderUnavailableError(`Photon reverse-geocode unreachable: ${(e as Error).message}`)
   }
@@ -25,6 +25,19 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
 export async function tryReverseGeocode(lat: number, lng: number): Promise<string | null> {
   try {
     return await reverseGeocode(lat, lng)
+  } catch {
+    return null
+  }
+}
+
+// ISO 3166-1 alpha-2, for gyms.countryCode - drives which local currency
+// a price displays in. Null on an outage, same reasoning as above.
+export async function tryReverseGeocodeCountryCode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}&lang=en`, { signal: AbortSignal.timeout(PHOTON_TIMEOUT_MS) })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.features?.[0]?.properties?.countrycode ?? null
   } catch {
     return null
   }

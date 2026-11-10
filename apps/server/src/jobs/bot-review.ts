@@ -1,7 +1,5 @@
-// Bot review of a `gym_changes` row (FR-24 to FR-27) - handles the
-// three proposal kinds: a brand-new gym, a non-price field change, and
-// a price change. applyDecision is shared with the admin approve/reject
-// route, so approval behaves identically no matter who decided it.
+// Bot review of a `gym_changes` row (FR-24 to FR-27). applyDecision is
+// shared with the admin approve/reject route.
 import { sql, eq } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, requests } from "../db/schema.js"
@@ -9,15 +7,24 @@ import { llm } from "../llm/index.js"
 import { queue } from "../queue/index.js"
 import { notifyRequestStatusChange } from "./push.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
-import { reverseGeocode, tryReverseGeocode, GeocoderUnavailableError } from "../geocode.js"
+import { reverseGeocode, tryReverseGeocode, tryReverseGeocodeCountryCode, GeocoderUnavailableError } from "../geocode.js"
 import { getFxRates } from "../fx.js"
-import { convertToUsdCents, isDuplicateMatch, looksLikeRealCoordinates, amountMinorToMajor } from "../lib.js"
+import { convertToUsdCents, isDuplicateMatch, looksLikeRealCoordinates, amountMinorToMajor, getCountryCurrency, COUNTRY_TO_CURRENCY } from "../lib.js"
 import type { ToolDef } from "../interfaces/llm.js"
 
 export type PriceKind = "day_pass" | "week_pass" | "month_pass"
-export type PriceSourceKind = "gym_website" | "price_menu" | "user" | "review" | "chat"
+export type PriceSourceKind = "gym_website" | "price_menu" | "user" | "review" | "chat" | "sweep_research"
 export const NON_PRICE_FIELDS = ["name", "address", "description", "categories", "acceptsDropIn", "hasTrial"] as const
 export type NonPriceField = (typeof NON_PRICE_FIELDS)[number]
+
+// A tool-calling model can hand back a wrong-typed value (e.g. "unknown"
+// for a boolean field) - applyProposedChange writes it straight into a
+// typed column, so this catches it before it ever reaches gym_changes.
+export function normalizeFieldValue(field: NonPriceField, value: unknown): unknown | null {
+  if (field === "acceptsDropIn" || field === "hasTrial") return typeof value === "boolean" ? value : null
+  if (field === "categories") return Array.isArray(value) && value.every((c) => typeof c === "string") ? value : null
+  return typeof value === "string" ? value : null
+}
 
 export interface PriceProposal {
   priceKind: PriceKind
@@ -236,8 +243,8 @@ async function verifyPriceChange(
   gymId: number | null
 ): Promise<ReviewResult> {
   if (!gymId) return { reviewStatus: "awaiting_admin", evidence: { reason: "No gym to verify this price against yet." } }
-  const [gym] = await db.execute<{ name: string; lat: number; lng: number }>(sql`
-    SELECT name, ST_Y(location) AS lat, ST_X(location) AS lng FROM gyms WHERE id = ${gymId}
+  const [gym] = await db.execute<{ name: string; lat: number; lng: number; country_code: string | null }>(sql`
+    SELECT name, ST_Y(location) AS lat, ST_X(location) AS lng, country_code FROM gyms WHERE id = ${gymId}
   `).then((r) => r.rows)
   if (!gym) return { reviewStatus: "awaiting_admin", evidence: { reason: "Gym not found." } }
 
@@ -282,6 +289,24 @@ async function verifyPriceChange(
         sourceKind: source_kind,
         sourceUrl: source_url,
       },
+    }
+  }
+
+  // The LLM is asked for the currency it actually saw, but a weaker
+  // model can mislabel it - cross-check against the gym's own country.
+  if (gym.country_code) {
+    const expectedCurrency = getCountryCurrency(gym.country_code, COUNTRY_TO_CURRENCY)
+    if (price_currency !== expectedCurrency) {
+      return {
+        reviewStatus: "awaiting_admin",
+        evidence: {
+          reason: `Found ${price_amount} ${price_currency}, but ${gym.country_code} gyms are expected to quote in ${expectedCurrency} - needs a human check.`,
+          foundAmount: price_amount,
+          foundCurrency: price_currency,
+          sourceKind: source_kind,
+          sourceUrl: source_url,
+        },
+      }
     }
   }
 
@@ -346,24 +371,26 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
     throw new Error(`gym_changes row has a pre-Phase-5 proposed shape with no "kind" discriminator: ${JSON.stringify(proposed)}`)
   }
   if (proposed.kind === "add_gym") {
+    const countryCode = await tryReverseGeocodeCountryCode(proposed.lat, proposed.lng)
     // Stamped so the weekly OSM refresh doesn't overwrite this for a year.
     // A plain `${proposed.categories}` drizzle-expands an empty array to
     // a bare "()", which Postgres rejects as a syntax error.
     const categoriesSql = sql`ARRAY[${sql.join(proposed.categories.map((c) => sql`${c}`), sql`, `)}]::text[]`
     const inserted = await tx.execute(sql`
-      INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial, name_location_decided_at)
+      INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial, name_location_decided_at, country_code)
       VALUES (${proposed.name}, ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326),
         ${proposed.address ?? null}, ${proposed.description ?? null}, ${categoriesSql},
-        ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now())
+        ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now(), ${countryCode})
       RETURNING id
     `)
     const newGymId = inserted.rows[0].id
     for (const price of proposed.prices) {
       // Unverified on arrival, same as every other add_gym price.
+      // Stored as USD always - local display is converted at read time.
       const usdCents = await resolveUsdCents(price.amountMinor, price.currency)
       await tx.execute(sql`
         INSERT INTO gym_prices (gym_id, kind, amount_minor, currency, usd_cents, source_kind, source_url, menu_posted_on)
-        VALUES (${newGymId}, ${price.priceKind}, ${price.amountMinor}, ${price.currency},
+        VALUES (${newGymId}, ${price.priceKind}, ${usdCents}, 'USD',
           ${usdCents}, ${price.sourceKind}, ${price.sourceUrl ?? null}, ${price.menuPostedOn ?? null})
       `)
     }
@@ -397,11 +424,12 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
     return
   }
 
-  // price: promote to the verified row, remove the now-superseded unverified one.
+  // price: promote to the verified row, remove the now-superseded unverified
+  // one. Stored as USD always - local display is converted at read time.
   const usdCents = await resolveUsdCents(proposed.amountMinor, proposed.currency)
   await tx.execute(sql`
     INSERT INTO gym_prices (gym_id, kind, amount_minor, currency, usd_cents, source_kind, source_url, menu_posted_on, verified_by)
-    VALUES (${gymId}, ${proposed.priceKind}, ${proposed.amountMinor}, ${proposed.currency}, ${usdCents}, ${proposed.sourceKind}, ${proposed.sourceUrl ?? null}, ${proposed.menuPostedOn ?? null}, ${decidedBy})
+    VALUES (${gymId}, ${proposed.priceKind}, ${usdCents}, 'USD', ${usdCents}, ${proposed.sourceKind}, ${proposed.sourceUrl ?? null}, ${proposed.menuPostedOn ?? null}, ${decidedBy})
     ON CONFLICT (gym_id, kind, is_verified)
     DO UPDATE SET amount_minor = EXCLUDED.amount_minor, currency = EXCLUDED.currency, usd_cents = EXCLUDED.usd_cents,
       source_kind = EXCLUDED.source_kind, source_url = EXCLUDED.source_url, menu_posted_on = EXCLUDED.menu_posted_on,
@@ -415,17 +443,14 @@ async function resolveUsdCents(amountMinor: number, currency: string): Promise<n
   return convertToUsdCents(amountMinorToMajor(amountMinor, currency), currency, rates)
 }
 
-// A price change is visible the moment it's submitted, unlike every
-// other change kind (STACK_AND_SCHEMA.md 2.6's asymmetry) - shared by
-// both real creators of a "price" gym_changes row: a user's own request
-// (src/routes/requests.ts) and a fact the chatbot finds (src/jobs/chat.ts,
-// FR-9 - which has no `requests` row to route through createRequest at
-// all, API.md 1.4).
+// A price is visible the moment it's submitted, unlike other changes -
+// shared by requests.ts's own submissions and chat.ts's found facts.
 export async function insertUnverifiedPrice(gymId: number, proposed: PriceProposal): Promise<void> {
+  // Stored as USD always - local display is converted at read time.
   const usdCents = await resolveUsdCents(proposed.amountMinor, proposed.currency)
   await db.execute(sql`
     INSERT INTO gym_prices (gym_id, kind, amount_minor, currency, usd_cents, source_kind, source_url, menu_posted_on)
-    VALUES (${gymId}, ${proposed.priceKind}, ${proposed.amountMinor}, ${proposed.currency},
+    VALUES (${gymId}, ${proposed.priceKind}, ${usdCents}, 'USD',
       ${usdCents}, ${proposed.sourceKind}, ${proposed.sourceUrl ?? null}, ${proposed.menuPostedOn ?? null})
     ON CONFLICT (gym_id, kind, is_verified)
     DO UPDATE SET amount_minor = EXCLUDED.amount_minor, currency = EXCLUDED.currency, usd_cents = EXCLUDED.usd_cents,
@@ -434,11 +459,7 @@ export async function insertUnverifiedPrice(gymId: number, proposed: PricePropos
 }
 
 // Creates one gym_changes row and queues its bot review - the one path
-// every change creator uses (a request's createRequest, and a
-// chat-found fact with no request at all), so every change gets
-// reviewed the same way regardless of where it came from
-// (STACK_AND_SCHEMA.md 2.10: "sweeps, chat facts and user submissions
-// all produce the same gym_changes, so one approval flow").
+// every change creator uses, so every change is reviewed the same way.
 export async function createGymChange(requestId: number | null, gymId: number | null, proposed: ProposedChange): Promise<number> {
   const [change] = await db.insert(gymChanges).values({ requestId, gymId, proposed }).returning()
   if (proposed.kind === "price" && gymId) await insertUnverifiedPrice(gymId, proposed)

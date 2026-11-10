@@ -1,17 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-// docs/gym-data-design.md: Photon for search-as-you-type. Not Nominatim's
-// public server as the PRIMARY search - it's 1 req/sec with no
-// autocomplete, disqualifying for that role. It's used below as a
-// fallback instead, which is a different bar to clear: it only needs to
-// work when Photon doesn't, not feel snappy on every keystroke.
+// Photon is primary; Nominatim is a dev-only fallback (CLAUDE.md bars it in production).
 const PHOTON_URL = 'https://photon.komoot.io/api/';
-// Confirmed live (verbose curl): DNS resolves fine, TCP connection to
-// Photon is refused in ~150ms, while a neighboring service on similar
-// hosting connects normally - looks like this app's IP tripped Photon's
-// own rate-limiting/abuse prevention after a long session of heavy use,
-// not a real Photon outage (their own status page shows it up).
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const DEBOUNCE_MS = 300;
 
@@ -48,22 +39,22 @@ function toLocationResult(feature: any): LocationResult {
   return { name: p.name, context, lat, lng, bbox };
 }
 
+const FETCH_TIMEOUT_MS = 5000;
+
 async function searchPhoton(query: string): Promise<LocationResult[]> {
   // lang=en - this app's audience is English-speaking travelers; without
   // it Photon returns names in the local script (e.g. "เชียงใหม่" instead
   // of "Chiang Mai").
-  const res = await fetch(`${PHOTON_URL}?q=${encodeURIComponent(query)}&limit=5&lang=en`);
+  const res = await fetch(`${PHOTON_URL}?q=${encodeURIComponent(query)}&limit=5&lang=en`, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`Photon request failed: ${res.status}`);
   const data = await res.json();
   return (data.features || []).map(toLocationResult);
 }
 
-// Nominatim's own display_name is "Place, District, Region, Country" -
-// first segment is the name, the rest is the same kind of context string
-// Photon's city/state/country fields give us. boundingbox comes back as
-// [minLat, maxLat, minLng, maxLng] (Nominatim's own order, different from
-// Photon's extent order above - easy to get backwards, so named clearly
-// here rather than destructured positionally like toLocationResult does).
+// boundingbox order is [minLat, maxLat, minLng, maxLng] - different
+// from Photon's extent above, named explicitly to avoid mixing them up.
 function toLocationResultFromNominatim(item: any): LocationResult {
   const [nameLabel, ...contextParts] = (item.display_name || '').split(',').map((s: string) => s.trim());
   const [minLat, maxLat, minLng, maxLng] = item.boundingbox.map(Number);
@@ -81,7 +72,7 @@ async function searchNominatim(query: string): Promise<LocationResult[]> {
     `${NOMINATIM_URL}?q=${encodeURIComponent(query)}&format=jsonv2&limit=5&accept-language=en`,
     // Nominatim's usage policy requires a real User-Agent identifying the
     // app - same one already used for Overpass elsewhere in this project.
-    { headers: { 'User-Agent': 'TravelApp-GymFinder-Demo/1.0 (hackathon demo)' } }
+    { headers: { 'User-Agent': 'TravelApp-GymFinder-Demo/1.0 (hackathon demo)' }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }
   );
   if (!res.ok) throw new Error(`Nominatim request failed: ${res.status}`);
   const data = await res.json();
@@ -99,12 +90,8 @@ export function LocationSearch({
   const [results, setResults] = useState<LocationResult[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Measured, not a CSS-style percentage - dropdown's `top: '100%'` was
-  // real CSS that React Native Web happily turns into actual CSS, but
-  // React Native's native layout engine (Yoga) doesn't reliably resolve
-  // percentage position offsets the same way, especially with no
-  // explicit height on the parent (`wrap` here is just however tall its
-  // children make it). That's why this worked on web and not on Android.
+  // Measured, not a CSS percentage - Yoga doesn't resolve `top: '100%'`
+  // the way web CSS does, which is why this broke on Android only.
   const [inputRowHeight, setInputRowHeight] = useState(48);
 
   useEffect(() => {
@@ -118,12 +105,16 @@ export function LocationSearch({
       try {
         setResults(await searchPhoton(query));
       } catch (photonError) {
-        console.error('Photon search failed, falling back to Nominatim', photonError);
-        try {
-          setResults(await searchNominatim(query));
-        } catch (nominatimError) {
-          console.error('Nominatim fallback also failed', nominatimError);
+        console.error('Photon search failed', photonError);
+        if (!__DEV__) {
           setResults([]);
+        } else {
+          try {
+            setResults(await searchNominatim(query));
+          } catch (nominatimError) {
+            console.error('Nominatim fallback also failed', nominatimError);
+            setResults([]);
+          }
         }
       } finally {
         setLoading(false);

@@ -44,6 +44,8 @@ import { LEAFLET_WEBVIEW_HTML } from '@/components/leaflet-webview-html';
 // Native's version of gym-map-screen.web.tsx - the map is a WebView
 // running real Leaflet (react-leaflet crashes on native).
 const FILTERS_VISIBLE_AT_ZOOM = 11;
+// How long to wait before rechecking a tile the OSM refresh just started on.
+const OSM_RECHECK_DELAY_MS = 30000;
 
 // Plain Pressable can't take an Animated.Value in its style.
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -94,7 +96,7 @@ export default function MapScreen() {
     zoom?: string;
   }>();
   const router = useRouter();
-  const { user, authHeaders } = useAuth();
+  const { authHeaders } = useAuth();
   // Applied directly to the panel's own top padding - an absolutely
   // positioned child doesn't inherit ancestor safe-area padding in RN.
   const insets = useSafeAreaInsets();
@@ -173,6 +175,10 @@ export default function MapScreen() {
   // A counter, not a boolean - several tiles load in parallel.
   const [tilesLoadingCount, setTilesLoadingCount] = useState(0);
   const bumpTilesLoading = (delta: number) => setTilesLoadingCount((c) => Math.max(0, c + delta));
+  // stale means the OSM refresh runs in the background, after this
+  // response - show that separately, then recheck once for its result.
+  const [osmRefreshingCount, setOsmRefreshingCount] = useState(0);
+  const bumpOsmRefreshing = (delta: number) => setOsmRefreshingCount((c) => Math.max(0, c + delta));
   // Tiles already fetched this session, by geohash4 - sweeps clear the
   // relevant entries so a fresh sweep's results aren't skipped as cached.
   const fetchedTilesRef = useRef(new Set<string>());
@@ -205,6 +211,16 @@ export default function MapScreen() {
             // A sweep can't cover a whole tile in one click (capped
             // cell count) - don't re-nag right after one just ran.
             if (data.fetchedAt === null && !opts?.suppressNudge) setShowScanNudge(true);
+            if (data.stale) {
+              bumpOsmRefreshing(1);
+              setTimeout(() => {
+                fetch(`${API_BASE_URL}/v1/tiles/${tile}`, { cache: 'no-store' })
+                  .then((r) => (r.ok ? r.json() : null))
+                  .then((refreshed) => refreshed && mergeFreshGyms(refreshed.gyms))
+                  .catch(() => {})
+                  .finally(() => bumpOsmRefreshing(-1));
+              }, OSM_RECHECK_DELAY_MS);
+            }
             return true;
           })
           .catch((e) => {
@@ -228,43 +244,43 @@ export default function MapScreen() {
 
   const findMoreGyms = async () => {
     if (!mapBounds || findingMore) return;
-    if (!user) {
-      setFindMoreMessage('Sign in to search for more gyms.');
-      return;
-    }
     // Clicking is what the nudge was asking for - dismiss immediately.
     setShowScanNudge(false);
     setFindingMore(true);
     setFindMoreMessage(null);
     try {
-      const cells = geohash5TilesCoveringBbox({ minLat: mapBounds.south, maxLat: mapBounds.north, minLng: mapBounds.west, maxLng: mapBounds.east });
+      const bbox = { minLat: mapBounds.south, maxLat: mapBounds.north, minLng: mapBounds.west, maxLng: mapBounds.east };
+      // One bbox call, not one per cell - the server fans out and caps it.
+      const res = await fetch(`${API_BASE_URL}/v1/sweeps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ bbox }),
+      });
+      if (!res.ok) throw new Error(`Sweep failed: ${res.status}`);
+      const { items } = await res.json();
       const settled = await Promise.all(
-        cells.map(async (geohash) =>
-          fetch(`${API_BASE_URL}/v1/sweeps`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-            credentials: 'include',
-            body: JSON.stringify({ geohash }),
-          })
-            .then((r) => {
-              if (!r.ok) throw new Error(`Sweep failed: ${r.status}`);
-              return r.json();
-            })
-            .then((created: GymRequest) => pollRequest(created.id, authHeaders))
-            .catch((e) => {
-              console.error('Sweep failed for a cell', e);
-              return null;
-            })
+        items.map((item: { id: string | null; status: string }) =>
+          item.id && item.status === 'pending' ? pollRequest(item.id, authHeaders).catch(() => null) : Promise.resolve(item)
         )
       );
       const completed = settled.filter((r): r is GymRequest => r != null);
-      const totalNew = completed.reduce((sum, r) => sum + ((r.result as { gymsNew?: number } | null)?.gymsNew ?? 0), 0);
       if (completed.length === 0) {
         setFindMoreMessage('Something went wrong - try again?');
       } else {
-        setFindMoreMessage(totalNew > 0 ? `Found ${totalNew} new gym(s).` : 'No new gyms found here.');
-        // Only clear the swept cells' own tile4s, not every tile on screen.
-        cells.forEach((cell) => fetchedTilesRef.current.delete(cell.slice(0, 4)));
+        // Still 'pending' means pollRequest's 60s timeout hit, not "found nothing".
+        const stillPending = completed.filter((r) => r.status === 'pending').length;
+        const totalNew = completed.reduce((sum, r) => sum + ((r.result as { gymsNew?: number } | null)?.gymsNew ?? 0), 0);
+        if (stillPending > 0) {
+          setFindMoreMessage(
+            totalNew > 0
+              ? `Found ${totalNew} new gym(s) so far - ${stillPending} area(s) still scanning. Check My Requests shortly.`
+              : `${stillPending} area(s) are still scanning - check My Requests shortly.`
+          );
+        } else {
+          setFindMoreMessage(totalNew > 0 ? `Found ${totalNew} new gym(s).` : 'No new gyms found here.');
+        }
+        geohash5TilesCoveringBbox(bbox).forEach((cell) => fetchedTilesRef.current.delete(cell.slice(0, 4)));
         loadTiles({ suppressNudge: true });
       }
     } finally {
@@ -458,10 +474,16 @@ export default function MapScreen() {
           <Text style={styles.backButtonText}>← Search again</Text>
         </Pressable>
 
-        {tilesLoadingCount > 0 && (
+        {tilesLoadingCount > 0 ? (
           <View style={styles.osmLoadingNote} pointerEvents="none">
             <Text style={styles.osmLoadingNoteText}>Loading gyms…</Text>
           </View>
+        ) : (
+          osmRefreshingCount > 0 && (
+            <View style={styles.osmLoadingNote} pointerEvents="none">
+              <Text style={styles.osmLoadingNoteText}>Finding gyms on OpenStreetMap…</Text>
+            </View>
+          )
         )}
 
         {zoom >= FILTERS_VISIBLE_AT_ZOOM && (
