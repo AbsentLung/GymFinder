@@ -3,10 +3,15 @@
 // (Photon answered, found nothing - FR-26's "likely in the sea" signal).
 export class GeocoderUnavailableError extends Error {}
 
+// Unset, these fetches can hang far longer than the caller expects - one
+// slow Photon response held applyProposedChange's DB transaction open,
+// and 20 of them (no timeout, no cap) froze the admin queue for 10-30s.
+const PHOTON_TIMEOUT_MS = 3000
+
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   let res: Response
   try {
-    res = await fetch(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}&lang=en`)
+    res = await fetch(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}&lang=en`, { signal: AbortSignal.timeout(PHOTON_TIMEOUT_MS) })
   } catch (e) {
     throw new GeocoderUnavailableError(`Photon reverse-geocode unreachable: ${(e as Error).message}`)
   }
@@ -31,7 +36,7 @@ export async function tryReverseGeocode(lat: number, lng: number): Promise<strin
 // a price displays in. Null on an outage, same reasoning as above.
 export async function tryReverseGeocodeCountryCode(lat: number, lng: number): Promise<string | null> {
   try {
-    const res = await fetch(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}&lang=en`)
+    const res = await fetch(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}&lang=en`, { signal: AbortSignal.timeout(PHOTON_TIMEOUT_MS) })
     if (!res.ok) return null
     const data = await res.json()
     return data.features?.[0]?.properties?.countrycode ?? null
