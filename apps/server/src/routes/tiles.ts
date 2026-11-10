@@ -93,7 +93,8 @@ export const tilesRoutes: FastifyPluginAsyncZod = async (app) => {
 
       for (const cell of staleCells) {
         // jobId dedupes several requests hitting a stale tile at once.
-        await queue.add("tile-refresh", { geohash5: cell }, { jobId: `tile-refresh-${cell}` })
+        // priority outranks the unprioritized (0) backlog from bulk seeding.
+        await queue.add("tile-refresh", { geohash5: cell }, { jobId: `tile-refresh-${cell}`, priority: "normal" })
       }
 
       reply.header("Cache-Control", "public, max-age=60, s-maxage=600, stale-while-revalidate=600")
