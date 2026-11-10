@@ -11,9 +11,15 @@ import { processPushNotify } from "./jobs/push.js"
 import { runWatchdog } from "./jobs/watchdog.js"
 
 export async function registerWorkerJobs(): Promise<void> {
-  await queue.process<{ geohash5: string }>("tile-refresh", async (payload) => {
-    await refreshTile(payload)
-  })
+  // Default concurrency is 1 - one stale geohash4 tile can enqueue up
+  // to 32 cells. 2 is overpass-api.de's own stated concurrency limit.
+  await queue.process<{ geohash5: string }>(
+    "tile-refresh",
+    async (payload) => {
+      await refreshTile(payload)
+    },
+    { concurrency: 2 }
+  )
   await queue.process<{ changeId: number }>("bot-review", processBotReviewChange)
   await queue.process<Parameters<typeof processChat>[0]>("chat", processChat)
   await queue.process<{ requestId: number; geohash5: string }>("sweep", processSweep)
