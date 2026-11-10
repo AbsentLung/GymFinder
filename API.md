@@ -282,7 +282,7 @@ How requests are created, endpoint by endpoint or through one generic endpoint:
 
 | Method | Path | Who | Body | What happens |
 |---|---|---|---|---|
-| POST | `/v1/sweeps` | 🌐 | `{ geohash }` or `{ bbox }` (split into geohash5 tiles, capped count) | Sweep job per tile (FR-11, FR-15, FR-22) - the one request kind that doesn't need an account. Signed in or not, rate limited per user or per IP (section 1.6). A tile swept recently returns `200` with an already-`completed` request; a tile already queued attaches to the existing job (same request returned). `result: { gymsFound, gymsNew }`. |
+| POST | `/v1/sweeps` | 🌐 | `{ geohash }` or `{ bbox }` (split into geohash5 tiles, capped count) | Sweep job per tile (FR-11, FR-15, FR-22) - the one request kind that doesn't need an account. Signed in or not, rate limited per user or per IP (section 1.6). A tile swept recently returns `200` with an already-`completed` request; a tile already queued attaches to the existing job (same request returned). `result: { gymsFound, gymsNew }`. Each new gym also gets a low-priority `research-gym` job queued (FR-31) - it only has a name/location at this point. |
 | POST | `/v1/gyms` | 🔒 | Proposed new gym: name, location, categories, prices with `sourceKind` / `sourceUrl` / `menuPostedOn`, ... | Add-gym request (FR-16). One `gym_changes` row, then bot review. |
 | POST | `/v1/gyms/{id}/changes` | 🔒 | Partial update with evidence for any price | Update-gym request (FR-16). |
 | GET | `/v1/requests/{id}` | 🌐/🔒 | | Current status (polling). A signed-out sweep has no owner, so anyone holding its id can poll it - same "knowing the id is enough" shape as chat (2.4b). Every other request kind is 🔒, readable by the user who made it or an admin. |

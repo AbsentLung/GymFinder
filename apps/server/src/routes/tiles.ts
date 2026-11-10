@@ -93,7 +93,8 @@ export const tilesRoutes: FastifyPluginAsyncZod = async (app) => {
 
       for (const cell of staleCells) {
         // jobId dedupes several requests hitting a stale tile at once.
-        await queue.add("tile-refresh", { geohash5: cell }, { jobId: `tile-refresh-${cell}` })
+        // high outranks the backlog (normal) - a live view always goes first.
+        await queue.add("tile-refresh", { geohash5: cell }, { jobId: `tile-refresh-${cell}`, priority: "high" })
       }
 
       reply.header("Cache-Control", "public, max-age=60, s-maxage=600, stale-while-revalidate=600")
