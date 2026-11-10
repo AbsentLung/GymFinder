@@ -34,6 +34,8 @@ import {
 
 // Below this zoom, amenity filters stop making sense and get hidden.
 const FILTERS_VISIBLE_AT_ZOOM = 11;
+// How long to wait before rechecking a tile the OSM refresh just started on.
+const OSM_RECHECK_DELAY_MS = 30000;
 
 function MapResize({ panelOpen }: { panelOpen: boolean }) {
   const map = useMap();
@@ -298,6 +300,10 @@ export default function MapScreen() {
   // A counter, not a boolean - several tiles load in parallel.
   const [tilesLoadingCount, setTilesLoadingCount] = useState(0);
   const bumpTilesLoading = (delta: number) => setTilesLoadingCount((c) => Math.max(0, c + delta));
+  // stale means the OSM refresh runs in the background, after this
+  // response - show that separately, then recheck once for its result.
+  const [osmRefreshingCount, setOsmRefreshingCount] = useState(0);
+  const bumpOsmRefreshing = (delta: number) => setOsmRefreshingCount((c) => Math.max(0, c + delta));
   // Tiles already fetched this session, by geohash4 - "find more gyms"
   // clears the relevant entries so a fresh sweep's results aren't skipped.
   const fetchedTilesRef = useRef(new Set<string>());
@@ -335,6 +341,16 @@ export default function MapScreen() {
             // A sweep can't cover a whole tile in one click (capped
             // cell count) - don't re-nag right after one just ran.
             if (data.fetchedAt === null && !opts?.suppressNudge) setShowScanNudge(true);
+            if (data.stale) {
+              bumpOsmRefreshing(1);
+              setTimeout(() => {
+                fetch(`${API_BASE_URL}/v1/tiles/${tile}`, { cache: 'no-store' })
+                  .then((r) => (r.ok ? r.json() : null))
+                  .then((refreshed) => refreshed && mergeFreshGyms(refreshed.gyms))
+                  .catch(() => {})
+                  .finally(() => bumpOsmRefreshing(-1));
+              }, OSM_RECHECK_DELAY_MS);
+            }
             return true;
           })
           .catch((e) => {
@@ -525,10 +541,16 @@ export default function MapScreen() {
           <Text style={styles.backButtonText}>← Search again</Text>
         </Pressable>
 
-        {tilesLoadingCount > 0 && (
+        {tilesLoadingCount > 0 ? (
           <View style={styles.osmLoadingNote} pointerEvents="none">
             <Text style={styles.osmLoadingNoteText}>Loading gyms…</Text>
           </View>
+        ) : (
+          osmRefreshingCount > 0 && (
+            <View style={styles.osmLoadingNote} pointerEvents="none">
+              <Text style={styles.osmLoadingNoteText}>Finding gyms on OpenStreetMap…</Text>
+            </View>
+          )
         )}
 
         {zoom >= FILTERS_VISIBLE_AT_ZOOM && (
