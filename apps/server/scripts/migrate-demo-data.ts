@@ -1,8 +1,4 @@
-// One-off migration from the vibe-coded demo DB (OLD_DATABASE_URL) into
-// the real schema (DATABASE_URL). Read-only against the old DB.
-//
-// Idempotent: every insert is keyed on a natural/constructed unique key,
-// so a re-run updates in place. Whole thing runs in one transaction.
+// One-off migration from the old demo DB into the real schema - idempotent, one transaction.
 //
 // Usage:
 //   OLD_DATABASE_URL=postgres://localhost:5432/travelapp \
@@ -77,9 +73,7 @@ async function migrate() {
     }
 
     // --- gyms + gym_source_refs + gym_prices + categories[] ----------
-    // Idempotency via gym_source_refs: OSM-sourced gyms key on their
-    // real osm_id; others get a synthetic `demo_gym` ref keyed on the
-    // old numeric id, so a re-run updates in place.
+    // Idempotency key: real osm_id for OSM gyms, else a synthetic `demo_gym` ref on the old id.
     const gymsRpt = report("gyms")
     const { rows: oldGyms } = await oldPool.query("SELECT * FROM gyms ORDER BY id")
     gymsRpt.oldCount = oldGyms.length
@@ -189,9 +183,7 @@ async function migrate() {
     }
 
     // --- reviews -------------------------------------------------------
-    // No natural unique key (free-text `author`, no user_id) - (gym_id,
-    // rating, created_at) is a practical dedup key here. Linked to a
-    // user only on an exact name match; else stays unlinked.
+    // No natural unique key - (gym_id, rating, created_at) is the practical dedup key.
     const reviewsRpt = report("reviews")
     const { rows: oldReviews } = await oldPool.query("SELECT * FROM reviews ORDER BY id")
     reviewsRpt.oldCount = oldReviews.length
@@ -220,10 +212,7 @@ async function migrate() {
     }
 
     // --- gym_submissions -> requests + gym_changes --------------------
-    // 'admin_request' is dropped - "apply to be admin" no longer exists.
-    // Everything else becomes a request + gym_changes pair, or a bare
-    // gym_changes row when the old submission has no user (requests.user_id
-    // is NOT NULL per FR-15, but gym_changes allows a null request_id).
+    // 'admin_request' is dropped (no longer exists); a userless submission becomes a bare gym_changes row.
     const STATUS_TO_REVIEW: Record<number, string> = {
       1: "pending_bot",
       2: "awaiting_admin",
@@ -295,9 +284,7 @@ async function migrate() {
     }
 
     // --- fetched_areas / scanned_areas -> tile_fetches ------------------
-    // No geohash concept in the old bbox tables - each bbox becomes one
-    // row keyed on a synthetic geohash, just to carry the audit fact
-    // forward. Real geohash4/5 coverage starts fresh from Phase 5 on.
+    // No geohash in the old bbox tables - each becomes one row on a synthetic geohash, audit-only.
     const tileFetchesRpt = report("fetched_areas/scanned_areas -> tile_fetches")
     const { rows: oldFetchedAreas } = await oldPool.query("SELECT * FROM fetched_areas")
     const { rows: oldScannedAreas } = await oldPool.query("SELECT * FROM scanned_areas")
