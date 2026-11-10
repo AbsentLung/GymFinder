@@ -20,10 +20,7 @@ export default function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // router.back() doesn't throw when there's nowhere to go back to (e.g.
-  // /auth was the very first page loaded in this tab) - it just silently
-  // no-ops, leaving the user stranded on the auth screen after a
-  // successful sign-in. canGoBack() is the real check.
+  // router.back() silently no-ops with nowhere to go back to - canGoBack() is the real check.
   const goBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/');
@@ -93,15 +90,16 @@ const BG = '#111315';
 const TEXT = '#F4F4F2';
 const TEXT_MUTED = '#A9ADB3';
 const FONT_SIZE_BODY = 13;
+const FONT_MONO = 'IBM Plex Mono, ui-monospace, monospace';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, alignItems: 'center', justifyContent: 'center', padding: 24 },
   card: { width: '100%', maxWidth: 380, gap: 14 },
   title: { fontFamily: 'Archivo, sans-serif', fontWeight: '900', fontSize: 28, color: TEXT },
-  subtitle: { fontFamily: 'IBM Plex Mono, ui-monospace, monospace', fontSize: FONT_SIZE_BODY, color: TEXT_MUTED, marginBottom: 6 },
+  subtitle: { fontFamily: FONT_MONO, fontSize: FONT_SIZE_BODY, color: TEXT_MUTED, marginBottom: 6 },
   field: { gap: 6 },
   label: {
-    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+    fontFamily: FONT_MONO,
     fontSize: 11,
     color: '#777D84',
     textTransform: 'uppercase',

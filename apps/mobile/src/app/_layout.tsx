@@ -14,11 +14,7 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   return (
-    // SafeAreaProvider has to wrap the app somewhere above any
-    // SafeAreaView/useSafeAreaInsets usage - without it those have no
-    // real inset data to read, so they apply zero padding rather than
-    // erroring, which is why gym-map-screen.tsx's earlier SafeAreaView
-    // fix had no visible effect at all on a real device.
+    // Must wrap the app above any SafeAreaView/useSafeAreaInsets usage.
     <SafeAreaProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AuthProvider>

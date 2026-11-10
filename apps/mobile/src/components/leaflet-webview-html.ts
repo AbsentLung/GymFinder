@@ -24,10 +24,7 @@ export const LEAFLET_WEBVIEW_HTML = `<!DOCTYPE html>
     var clickModeActive = false;
 
     function post(message) {
-      // react-native-webview injects postMessage on window on iOS/Android
-      // alike in recent versions, but older Android WebKit builds still
-      // only exposed it this way - sending through both costs nothing
-      // and avoids depending on exactly which one a given device has.
+      // react-native-webview injects postMessage on window, not always elsewhere.
       if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(message));
     }
 
@@ -50,14 +47,7 @@ export const LEAFLET_WEBVIEW_HTML = `<!DOCTYPE html>
     map.on('moveend', sendViewportChanged);
     map.on('zoomend', sendViewportChanged);
 
-    // Mobile's answer to the web map's mouse-hover prefetch - there's no
-    // hover on a touchscreen, but 'move' fires continuously WHILE a drag
-    // is in progress (before 'moveend'), so the native side can start
-    // warming the OSM cache for wherever the user is dragging toward
-    // before they actually let go. Throttled here, in the WebView itself,
-    // not just on the native side - keeps this to one tiny postMessage
-    // every 600ms during a drag instead of one per frame, so it can't
-    // compete with the drag gesture's own responsiveness.
+    // Touchscreen stand-in for the web map's hover prefetch - 'move' fires continuously during a drag.
     var lastDragPrefetch = 0;
     map.on('move', function () {
       var now = Date.now();
@@ -107,10 +97,7 @@ export const LEAFLET_WEBVIEW_HTML = `<!DOCTYPE html>
       }
     }
 
-    // Android WebView delivers postMessage via 'message' on document;
-    // iOS (and some Android versions) deliver it on window - listening
-    // on both is the standard react-native-webview workaround, not
-    // redundant for one specific platform.
+    // Android delivers postMessage via document, iOS via window - listen on both.
     document.addEventListener('message', function (e) { handleMessage(e.data); });
     window.addEventListener('message', function (e) { handleMessage(e.data); });
 
