@@ -394,10 +394,7 @@ export default function MapScreen() {
         setAddingGym(false);
         setNewGymLocation(null);
         setSelectedGym(gym);
-        // Explicit, not left to the selectedGym?.id-keyed reset effect -
-        // that effect only fires when the id actually CHANGES, so
-        // re-tapping the same (already selected, currently hidden-via-
-        // "View on map") pin needs this to actually reopen the panel.
+        // Explicit - the id-keyed reset effect won't fire for a re-tap of the same pin.
         setPanelHidden(false);
       }
     } else if (msg.type === 'clusterTap') {
