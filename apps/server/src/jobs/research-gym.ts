@@ -1,6 +1,4 @@
-// Background enrichment for a sweep-found gym - same research-and-
-// record pattern as chat.ts's record_price/record_gym_field, just
-// triggered right after a new gym appears instead of a question.
+// Background enrichment for a sweep-found gym - reuses chat.ts's record-and-review pattern.
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { llm } from "../llm/index.js"
