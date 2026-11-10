@@ -3,9 +3,7 @@
 // (Photon answered, found nothing - FR-26's "likely in the sea" signal).
 export class GeocoderUnavailableError extends Error {}
 
-// Unset, these fetches can hang far longer than the caller expects - one
-// slow Photon response held applyProposedChange's DB transaction open,
-// and 20 of them (no timeout, no cap) froze the admin queue for 10-30s.
+// A slow Photon response once held a DB transaction open with no bound.
 const PHOTON_TIMEOUT_MS = 3000
 
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {

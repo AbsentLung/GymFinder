@@ -252,9 +252,7 @@ export default function MapScreen() {
       if (completed.length === 0) {
         setFindMoreMessage('Something went wrong - try again?');
       } else {
-        // pollRequest gives up after 60s and hands back whatever it has -
-        // still 'pending' there means the sweep's still running, not that
-        // it found nothing.
+        // Still 'pending' means pollRequest's 60s timeout hit, not "found nothing".
         const stillPending = completed.filter((r) => r.status === 'pending').length;
         const totalNew = completed.reduce((sum, r) => sum + ((r.result as { gymsNew?: number } | null)?.gymsNew ?? 0), 0);
         if (stillPending > 0) {
