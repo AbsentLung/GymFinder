@@ -415,9 +415,8 @@ export function ChatSection({ gym }: { gym: Pick<Gym, 'id'> }) {
   );
 }
 
-// Only name is required - the bot fills in anything left blank from
-// Google's listing, but a submitter who already knows more can give it
-// upfront instead of waiting for an edit request later.
+// Only name is required - everything else is optional, filled in by
+// the bot if left blank.
 export function SubmitGymForm({
   location,
   onSubmitted,
