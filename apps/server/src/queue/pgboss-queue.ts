@@ -30,7 +30,7 @@ export class PgBossQueue implements QueueInterface {
   // But `exclusive` also serializes any queue with NO singletonKey to
   // one job at a time, silently dropping the rest. Opt queues in here
   // only once every `send` to them supplies a jobId.
-  private static readonly SINGLETON_QUEUES = new Set(["tile-refresh", "bot-review", "sweep"])
+  private static readonly SINGLETON_QUEUES = new Set(["tile-refresh", "bot-review", "sweep", "research-gym"])
 
   private async ensureQueue(name: string) {
     if (this.knownQueues.has(name)) return
