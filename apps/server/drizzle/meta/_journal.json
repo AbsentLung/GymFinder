@@ -64,6 +64,13 @@
       "when": 1794057126719,
       "tag": "0008_fixed_omega_red",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794084471191,
+      "tag": "0009_location_regions",
+      "breakpoints": true
     }
   ]
 }

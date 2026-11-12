@@ -10,6 +10,8 @@ export interface RawGym {
   address?: string | null
   description?: string | null
   categories?: string[]
+  /** Only when the source has a structured one (OSM addr:postcode); never parsed from free text. */
+  postcode?: string | null
 }
 
 export interface SourceInterface {

@@ -44,6 +44,9 @@ export class BullMqQueue implements QueueInterface {
       priority: opts.priority !== undefined ? PRIORITY_RANK[opts.priority] : undefined,
       delay: opts.delay,
       jobId: opts.jobId,
+      // BullMQ counts the first run as an attempt.
+      attempts: opts.retries !== undefined ? opts.retries + 1 : undefined,
+      backoff: opts.retryDelayMs !== undefined ? { type: "exponential", delay: opts.retryDelayMs } : undefined,
       // BullMQ keeps a finished job's id by default - without this, a
       // cell's custom id stays "already exists" forever after one run.
       removeOnComplete: true,

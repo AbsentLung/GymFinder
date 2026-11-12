@@ -25,6 +25,7 @@ import {
   gymMatchesSearch,
   pollRequest,
   TrialSection,
+  AddressRow,
   ReviewsSection,
   ChatSection,
   SubmitGymForm,
@@ -786,12 +787,7 @@ export default function MapScreen() {
                 <Text style={panelStyles.panelValue}>{selectedGymDetails?.description ?? selectedGym.description}</Text>
               </View>
             )}
-            {selectedGym.address && (
-              <View style={panelStyles.panelRow}>
-                <Text style={panelStyles.panelLabel}>Address</Text>
-                <Text style={panelStyles.panelValue}>{selectedGym.address}</Text>
-              </View>
-            )}
+            <AddressRow address={selectedGymDetails?.address ?? selectedGym.address} place={selectedGymDetails?.place} />
             {acceptsDropIn(selectedGymDetails ?? selectedGym) && (
               <View style={panelStyles.panelRow}>
                 <Text style={panelStyles.panelLabel}>Drop-ins</Text>

@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 
 import { useAuth } from '@/auth-context';
 import { API_BASE_URL } from '@/config';
+import { formatPlace, type Place } from '@/components/gym-panels';
 
 // The admin review queue. Typed loosely - a few legacy rows predate
 // bot-review.ts's ProposedChange union's `kind` field entirely.
@@ -28,6 +29,7 @@ interface AdminChange {
     hasTrial: boolean | null;
     status: string;
   } | null;
+  place: Place | null;
   evidence: { reason?: string; sourceUrl?: string; foundAmount?: number; foundCurrency?: string } | null;
   reviewStatus: 'pending_bot' | 'awaiting_admin' | 'approved' | 'rejected';
   decidedBy: 'bot' | 'admin' | null;
@@ -250,12 +252,13 @@ export default function AdminScreen() {
             <Text style={styles.rowSummary}>{summarizeProposed(c.proposed)}</Text>
             {c.currentGym && (
               <Text style={styles.rowCurrent}>
-                Current: {c.currentGym.name} — {c.currentGym.address ?? 'no address on file'}
+                Current: {c.currentGym.name} — {c.currentGym.address ?? formatPlace(c.place) ?? 'no address on file'}
               </Text>
             )}
             {coords && (
               <Text style={styles.rowCurrent}>
                 Coordinates: {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
+                {formatPlace(c.place) ? ` — ${formatPlace(c.place)}` : ''}
               </Text>
             )}
             {c.evidence?.reason && <Text style={styles.rowDescription}>Bot/admin note: “{c.evidence.reason}”</Text>}

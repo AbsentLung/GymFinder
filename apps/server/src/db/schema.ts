@@ -34,6 +34,32 @@ const point = customType<{ data: { lat: number; lng: number }; driverData: strin
   },
 })
 
+// Only ever written and read through raw SQL (seed script, ST_Contains).
+const multiPolygon = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "geometry(MultiPolygon, 4326)"
+  },
+})
+
+// State / province / island polygons (LOCATION_NAMES.md). Not "admin_*",
+// so it never reads like the admin role.
+export const regions = pgTable(
+  "regions",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    name: text("name").notNull(),
+    // ISO 3166-1 alpha-2; the country name is derived from it.
+    countryCode: text("country_code").notNull(),
+    geom: multiPolygon("geom").notNull(),
+    // e.g. "cgaz:ADM1:<shapeID>" - lets the seed upsert, keeping ids stable for gyms.region_id.
+    sourceRef: text("source_ref").notNull(),
+  },
+  (table) => [
+    index("regions_geom_gist").using("gist", table.geom),
+    uniqueIndex("regions_source_ref_unique").on(table.sourceRef),
+  ]
+)
+
 // Remapped from Better Auth's own "user" table name via auth.ts's
 // modelName option, to keep this app's bigint-id scheme everywhere.
 export const users = pgTable(
@@ -138,9 +164,13 @@ export const gyms = pgTable(
     // downstream ever read gyms.address/description from the old data.
     address: text("address"),
     description: text("description"),
-    // ISO 3166-1 alpha-2, from reverse-geocoding at creation. Drives
-    // which local currency a USD-stored price displays in.
+    // ISO 3166-1 alpha-2, from the gym's region (Photon if none matched).
+    // Drives which local currency a USD-stored price displays in.
     countryCode: text("country_code"),
+    // Region containing the gym; its name is read by join, never copied here (LOCATION_NAMES.md).
+    regionId: bigint("region_id", { mode: "number" }).references(() => regions.id, { onDelete: "set null" }),
+    // Free text - formats vary and many countries have none.
+    postcode: text("postcode"),
     acceptsDropIn: boolean("accepts_drop_in"),
     hasTrial: boolean("has_trial"),
     // Opening hours, amenities, website, trial details, etc.
@@ -161,6 +191,7 @@ export const gyms = pgTable(
     index("gyms_geohash4_idx").on(table.geohash4),
     index("gyms_geohash5_idx").on(table.geohash5),
     index("gyms_categories_gin").using("gin", table.categories),
+    index("gyms_region_idx").on(table.regionId),
     check("gyms_status_check", sql`${table.status} IN ('active', 'closed', 'hidden')`),
   ]
 )
