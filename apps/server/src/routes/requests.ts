@@ -27,10 +27,11 @@ const MAX_BBOX_CELLS = 20
 const sweepBodySchema = z.union([
   z.object({ geohash: z.string().regex(GEOHASH5_PATTERN, "must be a 5-character geohash") }),
   z.object({
-    // geohash5TilesCoveringBbox enumerates the whole bbox before MAX_BBOX_CELLS trims it.
+    // geohash5TilesCoveringBbox enumerates the whole bbox before MAX_BBOX_CELLS trims it - 2deg
+    // still enumerates in single-digit ms, but a normal desktop viewport at zoom 11 needs up to ~1.8deg.
     bbox: z
       .object({ minLat: z.number(), maxLat: z.number(), minLng: z.number(), maxLng: z.number() })
-      .refine((b) => b.maxLat - b.minLat <= 0.5 && b.maxLng - b.minLng <= 0.5, "bbox span must be 0.5 degrees or less"),
+      .refine((b) => b.maxLat - b.minLat <= 2 && b.maxLng - b.minLng <= 2, "bbox span must be 2 degrees or less"),
   }),
 ])
 

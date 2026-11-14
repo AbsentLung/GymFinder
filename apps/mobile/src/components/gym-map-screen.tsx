@@ -283,6 +283,9 @@ export default function MapScreen() {
         geohash5TilesCoveringBbox(bbox).forEach((cell) => fetchedTilesRef.current.delete(cell.slice(0, 4)));
         loadTiles({ suppressNudge: true });
       }
+    } catch (e) {
+      console.error('Find more gyms failed', e);
+      setFindMoreMessage('Something went wrong - try again?');
     } finally {
       setFindingMore(false);
     }
