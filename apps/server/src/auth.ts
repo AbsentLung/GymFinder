@@ -1,13 +1,19 @@
-// Pulled forward from Phase 5 - Phase 4's migration needs the real
-// table shapes (account.password) to exist before writing into them.
+// Schema shape was pulled forward into Phase 3/4 for the migration
+// script. This file is the actual auth wiring; routes mount in
+// src/routes/auth.ts.
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import bcrypt from "bcryptjs"
 import { db, schema } from "./db/index.js"
+import { config } from "./config.js"
 
 export const auth = betterAuth({
-  // Passing `schema` merges with the real `users` table instead of
-  // generating a conflicting one of its own.
+  baseURL: config.betterAuthUrl,
+  // Default is "/api/auth" - without this, every path mounted at
+  // /v1/auth/* 404s (Better Auth parses against its own basePath).
+  basePath: "/v1/auth",
+  // Merges with the real `users` table instead of generating a
+  // conflicting one of its own.
   database: drizzleAdapter(db, { provider: "pg", schema }),
   emailAndPassword: {
     enabled: true,
@@ -17,6 +23,16 @@ export const auth = betterAuth({
       hash: (password) => bcrypt.hash(password, 10),
       verify: ({ hash, password }) => bcrypt.compare(password, hash),
     },
+  },
+  // Google and Facebook at launch; Apple comes before the iOS release.
+  // Optional in local dev - undefined until a provider is registered.
+  socialProviders: {
+    ...(config.googleClientId && config.googleClientSecret
+      ? { google: { clientId: config.googleClientId, clientSecret: config.googleClientSecret } }
+      : {}),
+    ...(config.facebookClientId && config.facebookClientSecret
+      ? { facebook: { clientId: config.facebookClientId, clientSecret: config.facebookClientSecret } }
+      : {}),
   },
   // Remaps Better Auth's default text-id "user" table onto this app's
   // bigint-id `users`.

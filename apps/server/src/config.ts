@@ -21,6 +21,13 @@ export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   ollamaModel: process.env.OLLAMA_MODEL ?? "qwen2.5:3b",
   ollamaHost: process.env.OLLAMA_HOST ?? "http://localhost:11434",
+  // Needed for correct callback/redirect URLs, not just a label.
+  betterAuthUrl: process.env.BETTER_AUTH_URL ?? `http://localhost:${Number(process.env.PORT ?? 3001)}`,
+  // All optional - undefined in local dev (no real OAuth app yet).
+  googleClientId: process.env.GOOGLE_CLIENT_ID,
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  facebookClientId: process.env.FACEBOOK_CLIENT_ID,
+  facebookClientSecret: process.env.FACEBOOK_CLIENT_SECRET,
 } as const
 
 if (!config.databaseUrl) throw new Error("DATABASE_URL is not set")
