@@ -1,0 +1,43 @@
+# Local dev services for the new (non-demo) schema and scale-mode
+# pieces. Port 5432 is left free since the local `travelapp` Postgres
+# (the vibe-coded demo DB, migrated in Phase 4) already uses it on this
+# machine - 5433 here avoids clobbering it rather than requiring it to
+# move.
+#
+# Redis is only needed to actually exercise scale mode locally (demo
+# mode's cache/queue are in-memory/Postgres per DESIGN_DISCUSSION.md
+# 6.1) - included now so CI and local dev can run both modes.
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: gymfinder
+    ports:
+      - "5433:5432"
+    volumes:
+      - gymfinder_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - gymfinder_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  gymfinder_postgres_data:
+  gymfinder_redis_data:
