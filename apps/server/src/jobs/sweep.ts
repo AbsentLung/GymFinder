@@ -1,8 +1,5 @@
-// A bot sweeps an area on Google Maps for missing gyms. Google Maps is
-// itself one of FR-25's verified sources, so a sweep-found gym's
-// gym_changes row is created already approved - no separate bot-review
-// pass needed. Starts with just name/lat/lng; a later chat question or
-// edit still goes through the normal pipeline.
+// Google Maps is a verified source (FR-25), so a sweep-found gym's
+// gym_changes row is created already approved - no bot-review needed.
 import { sql, eq } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymChanges, requests } from "../db/schema.js"
@@ -10,6 +7,7 @@ import { geohashToBounds } from "../lib.js"
 import { googleMapsSource } from "../sources/index.js"
 import { GoogleMapsBlockedError } from "../sources/google-maps-source.js"
 import { upsertGym } from "./gym-upsert.js"
+import { notifyRequestStatusChange } from "./push.js"
 import type { ProposedChange } from "./bot-review.js"
 
 // Process-local backoff state - doubles on every consecutive Google
@@ -75,6 +73,7 @@ export async function processSweep({ requestId, geohash5 }: { requestId: number;
     ON CONFLICT (geohash, source) DO UPDATE SET last_fetched_at = now(), status = 'ok', gyms_found = ${found.length}
   `)
   await db.update(requests).set({ status: "completed", result: { gymsFound: found.length, gymsNew } }).where(eq(requests.id, requestId))
+  await notifyRequestStatusChange(requestId)
 }
 
 async function markSweepFailed(requestId: number, geohash5: string): Promise<void> {
@@ -84,4 +83,5 @@ async function markSweepFailed(requestId: number, geohash5: string): Promise<voi
     VALUES (${geohash5}, 'google_maps', now(), 'failed')
     ON CONFLICT (geohash, source) DO UPDATE SET last_fetched_at = now(), status = 'failed'
   `)
+  await notifyRequestStatusChange(requestId)
 }

@@ -1,12 +1,11 @@
-// Worker entry point - picks up jobs the API enqueued. registerWorkerJobs
-// is exported so src/dev.ts can register the same processors in demo
-// mode's combined process; this file's own main() is the scale-mode
-// standalone worker.
+// Worker entry point - registerWorkerJobs is exported so dev.ts can
+// reuse it in demo mode's combined process; main() below is scale-only.
 import { queue } from "./queue/index.js"
 import { refreshTile } from "./jobs/tile-refresh.js"
 import { processBotReviewChange } from "./jobs/bot-review-worker.js"
 import { processChat } from "./jobs/chat.js"
 import { processSweep } from "./jobs/sweep.js"
+import { processPushNotify } from "./jobs/push.js"
 import { runWatchdog } from "./jobs/watchdog.js"
 
 export async function registerWorkerJobs(): Promise<void> {
@@ -16,13 +15,14 @@ export async function registerWorkerJobs(): Promise<void> {
   await queue.process<{ changeId: number }>("bot-review", processBotReviewChange)
   await queue.process<Parameters<typeof processChat>[0]>("chat", processChat)
   await queue.process<{ requestId: number; geohash5: string }>("sweep", processSweep)
+  await queue.process<{ requestId: number }>("push-notify", processPushNotify)
   await queue.process<Record<string, never>>("watchdog", async () => {
     await runWatchdog()
   })
   // Every minute - deadlines are ~10 minutes (API.md 2.4), so this never
   // leaves a genuinely stuck request waiting much past its own deadline.
   await queue.schedule("watchdog", "* * * * *")
-  console.log("Worker processing: tile-refresh, bot-review, chat, sweep, watchdog")
+  console.log("Worker processing: tile-refresh, bot-review, chat, sweep, push-notify, watchdog")
 }
 
 async function main() {
