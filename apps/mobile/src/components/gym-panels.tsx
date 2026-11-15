@@ -1,41 +1,61 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, TextInput, View, ScrollView } from 'react-native';
 
 import { API_BASE_URL } from '@/config';
 import { useAuth } from '@/auth-context';
 
-// Shared between gym-map-screen.web.tsx (Leaflet) and gym-map-screen.tsx
-// (a WebView wrapping the same Leaflet map, for native) - everything here
-// is plain React Native primitives (View/Text/Pressable/TextInput/
-// ScrollView) with no DOM/window dependency, so it was always safe to run
-// on native; it just used to live inside the web-only file by accident of
-// where the map screen was first built. Splitting it out means the chat/
-// reviews/edit/add-gym features don't need a second, parallel
-// implementation for native - one real bug fix here fixes both platforms.
+// Shared by both platforms' map screens - plain RN primitives, no
+// DOM/window dependency, so one fix here covers chat/reviews/edit/add-gym
+// on native and web alike.
+
+// The tile-shape gym (GET /v1/tiles/{geohash4}) - lightweight: truncated
+// description, no trial/openingHours text, only the day-pass price
+// (week/month show up once full details load - see GymDetails).
+export interface DayPass {
+  amountMinor: number;
+  currency: string;
+  usdCents: number;
+  verified: boolean;
+}
 
 export interface Gym {
   id: number;
-  osm_id: number | null;
   name: string;
   lat: number;
   lng: number;
-  rating: string | null;
+  rating: number | null;
   description: string | null;
   address: string | null;
   categories: string[];
-  accepts_drop_in: boolean | null;
-  day_pass_price_cents: number | null;
-  week_pass_price_cents: number | null;
-  month_pass_price_cents: number | null;
-  suggested_day_pass_price_cents: number | null;
-  trial_days: number | null;
-  trial_details: string | null;
+  acceptsDropIn: boolean | null;
+  hasTrial: boolean | null;
+  dayPass: DayPass | null;
 }
 
-export interface FxRate {
+export interface PriceEntry {
+  kind: 'day_pass' | 'week_pass' | 'month_pass';
+  amountMinor: number;
   currency: string;
-  rate: number;
+  usdCents: number;
+  sourceKind: string;
+  sourceUrl: string | null;
+  verifiedBy: string | null;
+  lastSeenAt: string;
+}
+
+// The full-details shape (API.md 2.3, GET /v1/gyms/{id}) - fetched once
+// a specific gym's panel actually opens, not for every pin on the map.
+export interface GymDetails extends Gym {
+  // available is null, not coerced to false, when nothing's known yet -
+  // "we don't know" and "confirmed no trial" are different facts (see
+  // TrialSection below).
+  trial: { available: boolean | null; details: string | null };
+  openingHours: string | null;
+  prices: PriceEntry[];
+  reviewCount: number;
+  status: string;
+  updatedAt: string;
 }
 
 export interface NewGymLocation {
@@ -43,200 +63,181 @@ export interface NewGymLocation {
   lng: number;
 }
 
-// Shared by both platforms' "prefetch OSM data ahead of arrival" features
-// - web triggers this off mouse hover, native off a map drag in progress
-// (there's no hover on a touchscreen, but Leaflet's 'move' event fires
-// continuously during a drag too - see leaflet-webview-html.ts). Same
-// grid-cell dedup and fire-and-forget fetch either way, so the logic
-// only needs writing once. onLoadingChange(+1)/(-1) drives a shared
-// "Finding gyms on OSM…" note - a plain counter rather than a boolean so
-// overlapping prefetches (hover/drag firing faster than one fetch
-// resolves) don't flicker the note on and off.
-export const PREFETCH_CELL_DEG = 0.05; // ~5.5km - a loose "neighborhood", not pixel-precise
-
-export function prefetchAreaCell(lat: number, lng: number, prefetchedCells: Set<string>, onLoadingChange: (delta: number) => void) {
-  const cellLat = Math.floor(lat / PREFETCH_CELL_DEG);
-  const cellLng = Math.floor(lng / PREFETCH_CELL_DEG);
-  const cellKey = `${cellLat}:${cellLng}`;
-  if (prefetchedCells.has(cellKey)) return;
-  prefetchedCells.add(cellKey);
-  const minLat = cellLat * PREFETCH_CELL_DEG;
-  const minLng = cellLng * PREFETCH_CELL_DEG;
-  onLoadingChange(1);
-  fetch(
-    `${API_BASE_URL}/api/gyms/by-area?minLat=${minLat}&minLng=${minLng}` +
-      `&maxLat=${minLat + PREFETCH_CELL_DEG}&maxLng=${minLng + PREFETCH_CELL_DEG}`
-  )
-    .catch(() => {
-      // Fire-and-forget - a failed prefetch just means the real pan's
-      // own loadGyms call tries again for real later, same as always.
-    })
-    .finally(() => onLoadingChange(-1));
+export interface GymRequest {
+  id: string;
+  kind: 'add_gym' | 'update_gym' | 'sweep';
+  status: 'pending' | 'completed' | 'failed';
+  createdAt: string;
+  deadline: string;
+  result: Record<string, unknown> | null;
+  failureReason: string | null;
+  gymName: string | null;
+  changes: { id: string; reviewStatus: 'pending_bot' | 'awaiting_admin' | 'approved' | 'rejected'; reason: string | null }[];
 }
 
-// Live map-search filter, shared so both platforms match on the exact
-// same fields - name, description, address, and categories, not just
-// name, per explicit request. Plain case-insensitive substring, not a
-// fuzzy/ranked search: this filters which markers are even on screen,
-// so "obviously matches or doesn't" beats a relevance score here.
+// Add-gym/edit-request are async now (202 + poll) since bot review
+// actually searches the web. Fixed-interval, no backoff - fine while the
+// user's actively watching this form.
+const REQUEST_POLL_MS = 2000;
+const REQUEST_POLL_TIMEOUT_MS = 60000;
+
+export async function pollRequest(
+  requestId: string,
+  authHeaders: () => Promise<Record<string, string>>
+): Promise<GymRequest> {
+  const startedAt = Date.now();
+  while (true) {
+    const res = await fetch(`${API_BASE_URL}/v1/requests/${requestId}`, {
+      headers: await authHeaders(),
+      credentials: 'include',
+    });
+    if (!res.ok) throw new Error(`Poll failed: ${res.status}`);
+    const request: GymRequest = await res.json();
+    if (request.status !== 'pending' || Date.now() - startedAt > REQUEST_POLL_TIMEOUT_MS) return request;
+    await new Promise((resolve) => setTimeout(resolve, REQUEST_POLL_MS));
+  }
+}
+
+// Shared search filter - matches name, description, address, categories.
+// Plain substring match, not fuzzy/ranked: this just decides which
+// markers show on screen.
 export function gymMatchesSearch(gym: Gym, normalizedQuery: string): boolean {
   if (!normalizedQuery) return true;
   const haystack = [gym.name, gym.description, gym.address, ...gym.categories].filter(Boolean).join(' ').toLowerCase();
   return haystack.includes(normalizedQuery);
 }
 
-// Mirrors GYM_CATEGORIES in server/lib.js exactly - a fixed, generic
-// list rather than whatever free-text phrase a scrape happened to
-// produce, per explicit request. A gym can have several at once
-// (gym_categories is a join table server-side), not just one.
+// Mirrors GYM_CATEGORIES in apps/server/src/lib.ts. A gym can have several.
 export const GYM_CATEGORIES = [
   'Traditional', 'Group', 'Yoga', 'Bouldering', 'Swimming', 'Luxury', 'MMA', '24hr', 'Outdoor', 'Sports',
   'CrossFit', 'Hyrox', 'HIIT', 'Personal Trainer', 'Pilates',
 ];
 
-// A gym with zero categories on file still needs to be representable as
-// one of the category filter's own checkboxes - this stands in for
-// `categories.length === 0` there, never a real category value.
+// Stands in for `categories.length === 0` in the category filter UI -
+// never a real category value.
 export const UNKNOWN_CATEGORY = '__unknown__';
 
-// Manual symbol/decimals table, not Intl.NumberFormat's style: 'currency'
-// - that depends on the JS engine shipping full ICU currency data, and
-// this app's web bundle runs on Hermes, which doesn't reliably support
-// that for less-common codes. Confirmed live: every currency fix to the
-// data flow (FX endpoint, viewport-tracking, etc.) was already correct,
-// but display kept silently falling back to literal USD because
-// Intl.NumberFormat was throwing every single time and the try/catch
-// swallowed it. This has no engine dependency to fail.
+// Manual symbol/decimals table - Intl.NumberFormat's currency style needs
+// full ICU data this app's Hermes bundle doesn't reliably ship.
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', THB: '฿', IDR: 'Rp', VND: '₫', PHP: '₱', MYR: 'RM', SGD: 'S$',
   JPY: '¥', KRW: '₩', CNY: '¥', INR: '₹', EUR: '€', GBP: '£', AUD: 'A$',
   NZD: 'NZ$', KHR: '៛', LAK: '₭', MMK: 'K',
 };
-// Flipped from "most currencies get 2 decimals, a few exceptions get 0"
-// to "most get 0, decimals only survive where a single unit is worth
-// real money" - gym prices in THB/IDR/etc. are never actually quoted
-// down to a fractional unit, decimals there read as fake precision, not
-// accuracy. Driven off fx.rate itself (units of local currency per USD)
-// rather than a hardcoded currency list, so any currency qualifies the
-// same way: 1 unit has to be worth at least 20 cents USD for a decimal
-// of it to mean anything for a gym day-pass price. That threshold is
-// also why JPY/KRW/VND/THB/IDR etc. fall out automatically without
-// needing to be named - they're all weak enough per-unit to fail it.
-const MIN_UNIT_VALUE_USD_FOR_DECIMALS = 0.20;
 
-export function formatCents(cents: number | null, fx: FxRate): string | null {
-  if (cents == null) return null;
-  const localAmount = (cents / 100) * fx.rate;
-  const symbol = CURRENCY_SYMBOLS[fx.currency] ?? `${fx.currency} `;
-  const unitValueUsd = fx.rate > 0 ? 1 / fx.rate : 0;
+// Mirrors apps/server/src/lib.ts's ZERO_DECIMAL_CURRENCIES/
+// amountMinorToMajor - duplicated, no shared package wired up yet.
+const ZERO_DECIMAL_CURRENCIES = new Set(['IDR', 'JPY', 'KRW', 'VND', 'KHR', 'LAK', 'MMK']);
+function amountMinorToMajor(amountMinor: number, currency: string): number {
+  return ZERO_DECIMAL_CURRENCIES.has(currency) ? amountMinor : amountMinor / 100;
+}
+
+// Decimals only shown where a single unit is worth real money - driven
+// off the price's own usdCents, not a hardcoded currency list.
+const MIN_UNIT_VALUE_USD_FOR_DECIMALS = 0.2;
+
+export function formatPrice(price: { amountMinor: number; currency: string; usdCents: number } | null | undefined): string | null {
+  if (!price) return null;
+  const amountMajor = amountMinorToMajor(price.amountMinor, price.currency);
+  const symbol = CURRENCY_SYMBOLS[price.currency] ?? `${price.currency} `;
+  const unitValueUsd = amountMajor > 0 ? price.usdCents / 100 / amountMajor : 0;
   const decimals = unitValueUsd >= MIN_UNIT_VALUE_USD_FOR_DECIMALS ? 2 : 0;
-  return `${symbol}${localAmount.toFixed(decimals)}`;
+  return `${symbol}${amountMajor.toFixed(decimals)}`;
 }
 
-// Derived, not a stored field: a day/week/month rate implies drop-ins are
-// accepted. This loses the ability to say "confirmed yes, price unknown"
-// as distinct from "unknown either way" - a deliberate tradeoff, not an
-// oversight. No price means "not known," never "no."
-// accepts_drop_in is an explicit override, not the default - most gyms
-// are NULL here, meaning "use the derived assumption below." Only gets
-// set away from NULL when a source actually contradicts or confirms it
-// (e.g. "requires a signup fee before the day rate applies" would set it
-// to false even though a price exists) - see recordDropInStatus
-// server-side, the one place that writes it.
-export function acceptsDropIn(
-  gym: Pick<
-    Gym,
-    'accepts_drop_in' | 'day_pass_price_cents' | 'week_pass_price_cents' | 'month_pass_price_cents' | 'suggested_day_pass_price_cents'
-  >
-) {
-  if (gym.accepts_drop_in != null) return gym.accepts_drop_in;
-  // suggested_day_pass_price_cents counts too, not just the confirmed
-  // columns - caught live: the chatbot found a day-pass price via web
-  // search but (correctly, per its own recency rules) couldn't confirm
-  // the source was recent, so it landed in unverified_gym_data instead
-  // of the confirmed gyms columns. That's the right call for showing an
-  // exact price as fact, but it meant a gym the bot had just confirmed
-  // *does* sell day passes still vanished from this filter entirely -
-  // too strict a bar for "day rate exists at all," which is already
-  // shown elsewhere in the UI with an "unverified" caveat, not as fact.
-  return (
-    gym.day_pass_price_cents != null ||
-    gym.week_pass_price_cents != null ||
-    gym.month_pass_price_cents != null ||
-    gym.suggested_day_pass_price_cents != null
-  );
+// Derived: a day-pass price implies drop-ins are accepted. No price
+// means "not known," never "no."
+export function acceptsDropIn(gym: { acceptsDropIn: boolean | null; dayPass: DayPass | null; prices?: PriceEntry[] }): boolean {
+  if (gym.acceptsDropIn != null) return gym.acceptsDropIn;
+  if (gym.dayPass != null) return true;
+  return (gym.prices ?? []).length > 0;
 }
 
-export function formatTrial(days: number | null): string {
-  if (days == null) return 'Not known yet';
-  if (days === 0) return 'No trial';
-  return `${days}-day trial`;
+// DayPass.verified (precomputed boolean) and PriceEntry.verifiedBy
+// (raw "bot" | "admin" | null) carry the same fact under different
+// names - one place to check either shape.
+export function isPriceVerified(price: DayPass | PriceEntry): boolean {
+  return 'verified' in price ? price.verified : price.verifiedBy != null;
 }
 
-export function TrialSection({ gym }: { gym: Gym }) {
+export function TrialSection({ gym }: { gym: GymDetails }) {
   const [expanded, setExpanded] = useState(false);
-  if (gym.trial_days == null) return null;
+  // null = never researched - hide the row entirely.
+  if (gym.trial.available == null) return null;
   return (
     <View style={panelStyles.panelRow}>
       <Pressable style={panelStyles.sectionHeader} onPress={() => setExpanded((v) => !v)}>
         <Text style={panelStyles.panelLabel}>Trial</Text>
         <View style={panelStyles.sectionHeaderRight}>
-          <Text style={panelStyles.panelValue}>{formatTrial(gym.trial_days)}</Text>
+          <Text style={panelStyles.panelValue}>{gym.trial.available ? 'Available' : 'No trial'}</Text>
           <Text style={panelStyles.sectionChevron}>{expanded ? '▾' : '▸'}</Text>
         </View>
       </Pressable>
-      {expanded && <Text style={panelStyles.panelValue}>{gym.trial_details || 'No details provided'}</Text>}
+      {expanded && gym.trial.available && <Text style={panelStyles.panelValue}>{gym.trial.details || 'No details provided'}</Text>}
     </View>
   );
 }
 
 interface Review {
-  id: number;
-  author: string;
+  id: string;
+  userName: string | null;
   rating: number;
-  body: string;
-  created_at: string;
+  body: string | null;
+  createdAt: string;
+  isMine: boolean;
 }
 
 const RATINGS = [1, 2, 3, 4, 5];
 
+// One review per signed-in user per gym (API.md decision #9) - POST
+// uses the signed-in user's name; PUT .../reviews/mine is the Edit button.
 export function ReviewsSection({ gym }: { gym: Gym }) {
+  const { user, authHeaders } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [reviews, setReviews] = useState<Review[]>([]);
-  const [author, setAuthor] = useState('');
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const loadReviews = () => {
-    fetch(`${API_BASE_URL}/api/gyms/${gym.id}/reviews`, { cache: 'no-store' })
+    fetch(`${API_BASE_URL}/v1/gyms/${gym.id}/reviews`, { cache: 'no-store', credentials: 'include' })
       .then((r) => r.json())
-      .then(setReviews)
+      .then((data) => setReviews(data.items))
       .catch((e) => console.error('Failed to load reviews', e));
   };
 
   useEffect(loadReviews, [gym.id]);
 
+  const myReview = reviews.find((r) => r.isMine);
+
   const submit = async () => {
-    if (!author.trim() || !body.trim() || rating === 0 || submitting) return;
+    if (rating === 0 || submitting) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/gyms/${gym.id}/reviews`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ author, rating, body }),
+      const res = await fetch(`${API_BASE_URL}/v1/gyms/${gym.id}/reviews${myReview ? '/mine' : ''}`, {
+        method: myReview ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ rating, body: body.trim() || undefined }),
       });
       if (!res.ok) throw new Error(`Post review failed: ${res.status}`);
-      const created: Review = await res.json();
-      setReviews((prev) => [created, ...prev]);
-      setAuthor('');
-      setBody('');
       setRating(0);
+      setBody('');
+      setEditing(false);
+      loadReviews();
     } catch (e) {
       console.error('Failed to submit review', e);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const startEditing = () => {
+    if (!myReview) return;
+    setRating(myReview.rating);
+    setBody(myReview.body ?? '');
+    setEditing(true);
   };
 
   return (
@@ -248,46 +249,57 @@ export function ReviewsSection({ gym }: { gym: Gym }) {
 
       {expanded && (
         <>
-          <View style={panelStyles.reviewForm}>
-            <TextInput
-              style={panelStyles.input}
-              placeholder="Your name"
-              placeholderTextColor="#9AA3AB"
-              value={author}
-              onChangeText={setAuthor}
-            />
-            <View style={panelStyles.ratingPicker}>
-              {RATINGS.map((n) => (
-                <Pressable key={n} style={panelStyles.starHit} onPress={() => setRating(n)}>
-                  <Text style={[panelStyles.star, n <= rating && panelStyles.starFilled]}>★</Text>
+          {!user && <Text style={panelStyles.panelValue}>Sign in to leave a review.</Text>}
+
+          {user && myReview && !editing && (
+            <View style={panelStyles.reviewForm}>
+              <View style={panelStyles.reviewCardHeader}>
+                <Text style={panelStyles.reviewStars}>{'★'.repeat(myReview.rating)}</Text>
+                <Pressable onPress={startEditing}>
+                  <Text style={panelStyles.editLink}>Edit</Text>
                 </Pressable>
-              ))}
+              </View>
+              {myReview.body && <Text style={panelStyles.panelValue}>{myReview.body}</Text>}
             </View>
-            <TextInput
-              style={[panelStyles.input, panelStyles.textarea]}
-              placeholder="How was it?"
-              placeholderTextColor="#9AA3AB"
-              value={body}
-              onChangeText={setBody}
-              multiline
-            />
-            <Pressable style={[panelStyles.submitButton, submitting && panelStyles.submitButtonDisabled]} onPress={submit}>
-              <Text style={panelStyles.submitButtonText}>{submitting ? 'Posting…' : 'Post review'}</Text>
-            </Pressable>
-          </View>
+          )}
+
+          {user && (!myReview || editing) && (
+            <View style={panelStyles.reviewForm}>
+              <View style={panelStyles.ratingPicker}>
+                {RATINGS.map((n) => (
+                  <Pressable key={n} style={panelStyles.starHit} onPress={() => setRating(n)}>
+                    <Text style={[panelStyles.star, n <= rating && panelStyles.starFilled]}>★</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <TextInput
+                style={[panelStyles.input, panelStyles.textarea]}
+                placeholder="How was it?"
+                placeholderTextColor={PLACEHOLDER_COLOR}
+                value={body}
+                onChangeText={setBody}
+                multiline
+              />
+              <Pressable style={[panelStyles.submitButton, (submitting || rating === 0) && panelStyles.submitButtonDisabled]} onPress={submit}>
+                <Text style={panelStyles.submitButtonText}>{submitting ? 'Posting…' : myReview ? 'Save changes' : 'Post review'}</Text>
+              </Pressable>
+            </View>
+          )}
 
           {reviews.length === 0 ? (
             <Text style={panelStyles.panelValue}>No reviews yet — be the first.</Text>
           ) : (
-            reviews.map((review) => (
-              <View key={review.id} style={panelStyles.reviewCard}>
-                <View style={panelStyles.reviewCardHeader}>
-                  <Text style={panelStyles.reviewAuthor}>{review.author}</Text>
-                  <Text style={panelStyles.reviewStars}>{'★'.repeat(review.rating)}</Text>
+            reviews
+              .filter((r) => !r.isMine)
+              .map((review) => (
+                <View key={review.id} style={panelStyles.reviewCard}>
+                  <View style={panelStyles.reviewCardHeader}>
+                    <Text style={panelStyles.reviewAuthor}>{review.userName ?? 'Anonymous'}</Text>
+                    <Text style={panelStyles.reviewStars}>{'★'.repeat(review.rating)}</Text>
+                  </View>
+                  {review.body && <Text style={panelStyles.panelValue}>{review.body}</Text>}
                 </View>
-                <Text style={panelStyles.panelValue}>{review.body}</Text>
-              </View>
-            ))
+              ))
           )}
         </>
       )}
@@ -297,23 +309,19 @@ export function ReviewsSection({ gym }: { gym: Gym }) {
 
 interface ChatMessage {
   role: 'user' | 'assistant';
-  content: string;
+  text: string;
 }
 
-// Per-gym chat history, kept only for this JS session - module-level, not
-// component state, specifically so it survives the panel closing and
-// reopening (ChatSection remounts fresh each time via its `key` prop) but
-// vanishes the moment the app itself closes, per explicit request: "keep
-// it in memory until they close the app, no hard database storing."
+// Per-gym chat history, module-level (not component state) so it
+// survives the panel closing/reopening but vanishes when the app closes
+// - no database storage, per explicit request.
 const chatHistoryCache = new Map<number, ChatMessage[]>();
+const CHAT_POLL_MS = 1000;
+const CHAT_POLL_TIMEOUT_MS = 30000;
 
-// Answers are grounded server-side in whatever's actually on file for this
-// gym (description, pricing, trial, reviews), plus live web research the
-// server triggers when something's still missing - the model's told to
-// say it doesn't know rather than guess at anything not covered otherwise.
-// Expanded by default, unlike Trial/Reviews above - this is the thing
-// most worth a traveler's immediate attention.
-export function ChatSection({ gym, onGymUpdated }: { gym: Gym; onGymUpdated: (updatedGym: Gym) => void }) {
+// Async (202 + poll). A found fact becomes a gym_changes row through
+// the normal pipeline (FR-9), not a live update.
+export function ChatSection({ gym }: { gym: Pick<Gym, 'id'> }) {
   const [expanded, setExpanded] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>(() => chatHistoryCache.get(gym.id) ?? []);
   useEffect(() => {
@@ -324,30 +332,37 @@ export function ChatSection({ gym, onGymUpdated }: { gym: Gym; onGymUpdated: (up
 
   const send = async () => {
     if (!input.trim() || sending) return;
-    const userMessage: ChatMessage = { role: 'user', content: input.trim() };
+    const question = input.trim();
+    const userMessage: ChatMessage = { role: 'user', text: question };
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
     setInput('');
     setSending(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/gyms/${gym.id}/chat`, {
+      const res = await fetch(`${API_BASE_URL}/v1/gyms/${gym.id}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage.content, history: messages }),
+        body: JSON.stringify({ question, history: messages.slice(-6) }),
       });
       if (!res.ok) throw new Error(`Chat request failed: ${res.status}`);
-      const data = await res.json();
-      setMessages([...nextMessages, { role: 'assistant', content: data.reply }]);
-      // The chat endpoint re-fetches the gym after any tool call and
-      // sends it back for exactly this reason - a price/description/
-      // address/category the bot just found is a real write already
-      // committed to Postgres, and without merging it in here it
-      // wouldn't show up in the sidebar until the panel was closed and
-      // reopened.
-      if (data.gym) onGymUpdated(data.gym);
+      const { chatId } = await res.json();
+
+      const startedAt = Date.now();
+      let answerText = "Sorry, I couldn't answer that just now — try again?";
+      while (Date.now() - startedAt < CHAT_POLL_TIMEOUT_MS) {
+        const pollRes = await fetch(`${API_BASE_URL}/v1/chats/${chatId}`);
+        const data = await pollRes.json();
+        if (data.status === 'answered') {
+          answerText = data.answer;
+          break;
+        }
+        if (data.status === 'failed' || data.status === 'expired') break;
+        await new Promise((resolve) => setTimeout(resolve, CHAT_POLL_MS));
+      }
+      setMessages([...nextMessages, { role: 'assistant', text: answerText }]);
     } catch (e) {
       console.error('Chat failed', e);
-      setMessages([...nextMessages, { role: 'assistant', content: "Sorry, I couldn't answer that just now — try again?" }]);
+      setMessages([...nextMessages, { role: 'assistant', text: "Sorry, I couldn't answer that just now — try again?" }]);
     } finally {
       setSending(false);
     }
@@ -364,7 +379,7 @@ export function ChatSection({ gym, onGymUpdated }: { gym: Gym; onGymUpdated: (up
         <View style={panelStyles.chatBox}>
           {messages.map((m, i) => (
             <View key={i} style={[panelStyles.chatBubble, m.role === 'user' ? panelStyles.chatBubbleUser : panelStyles.chatBubbleAssistant]}>
-              <Text style={m.role === 'user' ? panelStyles.chatBubbleUserText : panelStyles.chatBubbleAssistantText}>{m.content}</Text>
+              <Text style={m.role === 'user' ? panelStyles.chatBubbleUserText : panelStyles.chatBubbleAssistantText}>{m.text}</Text>
             </View>
           ))}
           {sending && <Text style={panelStyles.panelValue}>Thinking…</Text>}
@@ -374,15 +389,11 @@ export function ChatSection({ gym, onGymUpdated }: { gym: Gym; onGymUpdated: (up
               value={input}
               onChangeText={setInput}
               placeholder="Ask about pricing, trials, hours, or anything else that isn't display here. Our bot will do the research for you."
-              placeholderTextColor="#9AA3AB"
+              placeholderTextColor={PLACEHOLDER_COLOR}
               multiline
               onSubmitEditing={send}
-              // onSubmitEditing above never actually fires on web - RN
-              // Web's multiline TextInput renders a real <textarea>, where
-              // Enter just inserts a newline like any textarea. Shift+Enter
-              // still does that; plain Enter submits instead. Native
-              // TextInput does fire onSubmitEditing normally, so this
-              // listener is harmless there (web-only nativeEvent shape).
+              // onSubmitEditing doesn't fire on web's <textarea>; plain
+              // Enter submits here instead, Shift+Enter still newlines.
               onKeyPress={(e) => {
                 const { key, shiftKey } = e.nativeEvent as unknown as { key?: string; shiftKey?: boolean };
                 if (key === 'Enter' && !shiftKey) {
@@ -404,10 +415,8 @@ export function ChatSection({ gym, onGymUpdated }: { gym: Gym; onGymUpdated: (up
   );
 }
 
-// Deliberately minimal: only the name is ever collected here. Address and
-// description get filled in by the bot from Google's own listing once it
-// confirms a match. Everything else - pricing, trial, drop-in - only
-// arrives later through an edit request, not at creation.
+// Only name is required - everything else is optional, filled in by
+// the bot if left blank.
 export function SubmitGymForm({
   location,
   onSubmitted,
@@ -420,14 +429,20 @@ export function SubmitGymForm({
   const router = useRouter();
   const { user, authHeaders } = useAuth();
   const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
   const [description, setDescription] = useState('');
+  const [categories, setCategories] = useState<string[]>([]);
+  const [acceptsDropIn, setAcceptsDropIn] = useState<boolean | null>(null);
+  const [hasTrial, setHasTrial] = useState<boolean | null>(null);
+  const [dayPassPrice, setDayPassPrice] = useState('');
+  const [weekPassPrice, setWeekPassPrice] = useState('');
+  const [monthPassPrice, setMonthPassPrice] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{
-    statusId: number;
-    statusLabel: string;
-    botReason: string | null;
-    gymId: number | null;
-  } | null>(null);
+  const [result, setResult] = useState<{ approved: boolean; reason: string | null; pending: boolean } | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   if (!user) {
     return (
@@ -441,52 +456,50 @@ export function SubmitGymForm({
   }
 
   const submit = async () => {
-    if (!name.trim() || !description.trim() || submitting) return;
+    if (!name.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/gyms/submissions`, {
+      const prices = ([
+        { priceKind: 'day_pass' as const, value: dayPassPrice },
+        { priceKind: 'week_pass' as const, value: weekPassPrice },
+        { priceKind: 'month_pass' as const, value: monthPassPrice },
+      ])
+        .filter((p) => p.value.trim().length > 0)
+        .map((p) => ({ priceKind: p.priceKind, amountMinor: Math.round(parseFloat(p.value) * 100), currency: 'USD', sourceKind: 'user' as const }))
+        .filter((p) => Number.isFinite(p.amountMinor) && p.amountMinor > 0);
+
+      const res = await fetch(`${API_BASE_URL}/v1/gyms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         credentials: 'include',
-        body: JSON.stringify({ name, lat: location.lat, lng: location.lng, description }),
+        body: JSON.stringify({
+          name,
+          lat: location.lat,
+          lng: location.lng,
+          categories,
+          ...(address.trim() ? { address: address.trim() } : {}),
+          ...(description.trim() ? { description: description.trim() } : {}),
+          ...(acceptsDropIn != null ? { acceptsDropIn } : {}),
+          ...(hasTrial != null ? { hasTrial } : {}),
+          prices,
+        }),
       });
       if (!res.ok) throw new Error(`Submit gym failed: ${res.status}`);
-      const data = await res.json();
-      setResult(data);
-      // Merge the new pin into live state the moment we know about it -
-      // not deferred until the user clicks a specific "Done" button. The
-      // panel also has its own "✕" close button; closing via that instead
-      // of Done used to silently drop an already-created gym from view
-      // until a full page refresh, since only Done used to carry this
-      // merge. Decoupling it from any particular button closes that gap
-      // regardless of how the panel gets dismissed.
-      onSubmitted(
-        data.statusId === 3 && data.gymId != null
-          ? {
-              id: data.gymId,
-              osm_id: null,
-              // Bot-corrected, not the raw form input - caught live:
-              // submitted "Dang Muay Thai", the scrape found the real
-              // listing's name, but this used to just echo back what was
-              // typed, so the correction didn't show until a refresh
-              // re-fetched the real row from Postgres.
-              name: data.gymName ?? name,
-              lat: location.lat,
-              lng: location.lng,
-              rating: null,
-              description: null,
-              address: data.gymAddress ?? null,
-              categories: data.categories ?? [],
-              accepts_drop_in: null,
-              day_pass_price_cents: null,
-              week_pass_price_cents: null,
-              month_pass_price_cents: null,
-              suggested_day_pass_price_cents: null,
-              trial_days: null,
-              trial_details: null,
-            }
-          : null
-      );
+      const created: GymRequest = await res.json();
+      // Bot review runs real web searches - show "submitted" now rather
+      // than blocking on it, then refine in the background once it's done.
+      setResult({ approved: false, reason: null, pending: true });
+      // No optimistic gym object - the server doesn't return a gym id
+      // for add-gym (API.md 2.4). Next tile fetch picks it up if approved.
+      onSubmitted(null);
+      pollRequest(created.id, authHeaders)
+        .then((final) => {
+          if (!mountedRef.current) return;
+          const change = final.changes[0];
+          setResult({ approved: change?.reviewStatus === 'approved', reason: change?.reason ?? null, pending: false });
+          onSubmitted(null);
+        })
+        .catch((e) => console.error('Failed to poll gym request status', e));
     } catch (e) {
       console.error('Failed to submit gym', e);
     } finally {
@@ -498,14 +511,16 @@ export function SubmitGymForm({
     return (
       <View style={panelStyles.panelRow}>
         <Text style={panelStyles.panelLabel}>Submitted</Text>
-        {result.statusId === 3 ? (
+        {result.pending ? (
+          <Text style={panelStyles.panelValue}>Your gym has been submitted — we&apos;re reviewing it now.</Text>
+        ) : result.approved ? (
           <Text style={panelStyles.panelValue}>
-            Your gym is <Text style={{ fontWeight: '700' }}>live now</Text> — it checked out automatically.
+            Your gym is <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>live now</Text> — it checked out automatically.
           </Text>
         ) : (
           <Text style={panelStyles.panelValue}>
-            This gym is now <Text style={{ fontWeight: '700' }}>{result.statusLabel}</Text>
-            {result.botReason ? ` (${result.botReason})` : ''}. An admin will take a look — that can take a few days.
+            This gym is now <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>awaiting admin review</Text>
+            {result.reason ? ` (${result.reason})` : ''}. That can take a few days.
           </Text>
         )}
         <Pressable style={panelStyles.submitButton} onPress={onClose}>
@@ -528,38 +543,102 @@ export function SubmitGymForm({
         <TextInput style={panelStyles.input} value={name} onChangeText={setName} />
       </View>
       <View style={panelStyles.panelRow}>
-        <Text style={panelStyles.panelLabel}>Description</Text>
+        <Text style={panelStyles.panelLabel}>Address (optional)</Text>
+        <TextInput style={panelStyles.input} value={address} onChangeText={setAddress} />
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Description (optional)</Text>
         <TextInput
           style={[panelStyles.input, panelStyles.textarea]}
           value={description}
           onChangeText={setDescription}
-          placeholder="Why are you adding this gym?"
           multiline
           numberOfLines={3}
         />
       </View>
-      <Pressable
-        style={[panelStyles.submitButton, (submitting || !name.trim() || !description.trim()) && panelStyles.submitButtonDisabled]}
-        onPress={submit}
-      >
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Categories (optional)</Text>
+        <View style={panelStyles.editFieldPicker}>
+          {GYM_CATEGORIES.map((cat) => {
+            const active = categories.includes(cat);
+            return (
+              <Pressable
+                key={cat}
+                style={[panelStyles.editFieldChip, active && panelStyles.editFieldChipActive]}
+                onPress={() => setCategories((prev) => (active ? prev.filter((c) => c !== cat) : [...prev, cat]))}
+              >
+                <Text style={[panelStyles.editFieldChipText, active && panelStyles.editFieldChipTextActive]}>{cat}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Accepts drop-ins (optional)</Text>
+        <View style={panelStyles.editFieldPicker}>
+          {([
+            { label: 'Unknown', val: null },
+            { label: 'Yes', val: true },
+            { label: 'No', val: false },
+          ] as const).map((opt) => (
+            <Pressable
+              key={opt.label}
+              style={[panelStyles.editFieldChip, acceptsDropIn === opt.val && panelStyles.editFieldChipActive]}
+              onPress={() => setAcceptsDropIn(opt.val)}
+            >
+              <Text style={[panelStyles.editFieldChipText, acceptsDropIn === opt.val && panelStyles.editFieldChipTextActive]}>{opt.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Offers a trial (optional)</Text>
+        <View style={panelStyles.editFieldPicker}>
+          {([
+            { label: 'Unknown', val: null },
+            { label: 'Yes', val: true },
+            { label: 'No', val: false },
+          ] as const).map((opt) => (
+            <Pressable
+              key={opt.label}
+              style={[panelStyles.editFieldChip, hasTrial === opt.val && panelStyles.editFieldChipActive]}
+              onPress={() => setHasTrial(opt.val)}
+            >
+              <Text style={[panelStyles.editFieldChipText, hasTrial === opt.val && panelStyles.editFieldChipTextActive]}>{opt.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Day pass price, USD (optional)</Text>
+        <TextInput style={panelStyles.input} value={dayPassPrice} onChangeText={setDayPassPrice} keyboardType="numeric" placeholder="e.g. 12.00" placeholderTextColor={PLACEHOLDER_COLOR} />
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Week pass price, USD (optional)</Text>
+        <TextInput style={panelStyles.input} value={weekPassPrice} onChangeText={setWeekPassPrice} keyboardType="numeric" placeholder="e.g. 60.00" placeholderTextColor={PLACEHOLDER_COLOR} />
+      </View>
+      <View style={panelStyles.panelRow}>
+        <Text style={panelStyles.panelLabel}>Month pass price, USD (optional)</Text>
+        <TextInput style={panelStyles.input} value={monthPassPrice} onChangeText={setMonthPassPrice} keyboardType="numeric" placeholder="e.g. 150.00" placeholderTextColor={PLACEHOLDER_COLOR} />
+      </View>
+      <Pressable style={[panelStyles.submitButton, (submitting || !name.trim()) && panelStyles.submitButtonDisabled]} onPress={submit}>
         <Text style={panelStyles.submitButtonText}>{submitting ? 'Submitting…' : 'Submit gym'}</Text>
       </Pressable>
     </ScrollView>
   );
 }
 
-// Mirrors server/index.js's EDITABLE_FIELDS whitelist - 'kind' just picks
-// which input this form shows, the field keys and what they mean live
-// there, this is the client-side rendering of the same list.
-export const EDITABLE_FIELDS: { key: string; label: string; kind: 'price' | 'number' | 'text' | 'category' }[] = [
-  { key: 'day_pass_price_cents', label: 'Day pass price (USD)', kind: 'price' },
-  { key: 'week_pass_price_cents', label: 'Week pass price (USD)', kind: 'price' },
-  { key: 'month_pass_price_cents', label: 'Month pass price (USD)', kind: 'price' },
+// Mirrors bot-review.ts's NON_PRICE_FIELDS plus the three price kinds.
+// Trial details text isn't offered - only hasTrial is in the whitelist.
+export const EDITABLE_FIELDS: { key: string; label: string; kind: 'price' | 'text' | 'category' | 'boolean' }[] = [
+  { key: 'day_pass', label: 'Day pass price (USD)', kind: 'price' },
+  { key: 'week_pass', label: 'Week pass price (USD)', kind: 'price' },
+  { key: 'month_pass', label: 'Month pass price (USD)', kind: 'price' },
   { key: 'description', label: 'Description', kind: 'text' },
   { key: 'address', label: 'Address', kind: 'text' },
-  { key: 'category', label: 'Category', kind: 'category' },
-  { key: 'trial_days', label: 'Trial days (0 for none)', kind: 'number' },
-  { key: 'trial_details', label: 'Trial details', kind: 'text' },
+  { key: 'categories', label: 'Categories', kind: 'category' },
+  { key: 'acceptsDropIn', label: 'Accepts drop-ins', kind: 'boolean' },
+  { key: 'hasTrial', label: 'Offers a trial', kind: 'boolean' },
 ];
 
 export function SuggestEditForm({
@@ -567,7 +646,7 @@ export function SuggestEditForm({
   onDone,
   onCancel,
 }: {
-  gym: Gym;
+  gym: GymDetails;
   onDone: (updatedGym: Gym | null) => void;
   onCancel: () => void;
 }) {
@@ -575,9 +654,17 @@ export function SuggestEditForm({
   const { user, authHeaders } = useAuth();
   const [fieldKey, setFieldKey] = useState(EDITABLE_FIELDS[0].key);
   const [value, setValue] = useState('');
+  // categories submits a whole replacement SET, not an add-one-tag merge
+  // - pre-populate with current categories or an edit would wipe the rest.
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(gym.categories);
+  const [boolValue, setBoolValue] = useState(true);
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ statusId: number; statusLabel: string; botReason: string | null } | null>(null);
+  const [result, setResult] = useState<{ approved: boolean; reason: string | null; pending: boolean } | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   if (!user) {
     return (
@@ -591,24 +678,50 @@ export function SuggestEditForm({
   }
 
   const field = EDITABLE_FIELDS.find((f) => f.key === fieldKey)!;
+  const isPriceField = field.kind === 'price';
+
+  const canSubmit =
+    !submitting &&
+    description.trim().length > 0 &&
+    (field.kind === 'category' || field.kind === 'boolean' || value.trim().length > 0);
 
   const submit = async () => {
-    if (!value.trim() || !description.trim() || submitting) return;
-    const newValue = field.kind === 'price' ? Math.round(parseFloat(value) * 100) : field.kind === 'number' ? parseInt(value, 10) : value;
-    if ((field.kind === 'price' || field.kind === 'number') && !Number.isFinite(newValue)) return;
+    if (!canSubmit) return;
+    let newValue: unknown;
+    if (isPriceField) {
+      const amountMinor = Math.round(parseFloat(value) * 100);
+      if (!Number.isFinite(amountMinor)) return;
+      newValue = { amountMinor, currency: 'USD', sourceKind: 'user' };
+    } else if (field.kind === 'category') {
+      newValue = selectedCategories;
+    } else if (field.kind === 'boolean') {
+      newValue = boolValue;
+    } else {
+      newValue = value;
+    }
 
     setSubmitting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/gyms/${gym.id}/edit-request`, {
+      const res = await fetch(`${API_BASE_URL}/v1/gyms/${gym.id}/changes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         credentials: 'include',
         body: JSON.stringify({ field: field.key, newValue, description }),
       });
       if (!res.ok) throw new Error(`Edit request failed: ${res.status}`);
-      const data = await res.json();
-      setResult(data);
-      onDone(data.statusId === 3 && data.gym ? data.gym : null);
+      const created: GymRequest = await res.json();
+      // Same as SubmitGymForm - don't block on bot review's own web
+      // searches before confirming the submission.
+      setResult({ approved: false, reason: null, pending: true });
+      onDone(null); // the next tile/details fetch picks up the real change, same as SubmitGymForm.
+      pollRequest(created.id, authHeaders)
+        .then((final) => {
+          if (!mountedRef.current) return;
+          const change = final.changes[0];
+          setResult({ approved: change?.reviewStatus === 'approved', reason: change?.reason ?? null, pending: false });
+          onDone(null);
+        })
+        .catch((e) => console.error('Failed to poll edit request status', e));
     } catch (e) {
       console.error('Failed to submit edit request', e);
     } finally {
@@ -620,14 +733,16 @@ export function SuggestEditForm({
     return (
       <View style={panelStyles.panelRow}>
         <Text style={panelStyles.panelLabel}>Submitted</Text>
-        {result.statusId === 3 ? (
+        {result.pending ? (
+          <Text style={panelStyles.panelValue}>Your edit has been submitted — we&apos;re reviewing it now.</Text>
+        ) : result.approved ? (
           <Text style={panelStyles.panelValue}>
-            Confirmed — <Text style={{ fontWeight: '700' }}>{field.label}</Text> updated right away.
+            Confirmed — <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>{field.label}</Text> updated right away.
           </Text>
         ) : (
           <Text style={panelStyles.panelValue}>
-            This edit is now <Text style={{ fontWeight: '700' }}>{result.statusLabel}</Text>
-            {result.botReason ? ` (${result.botReason})` : ''}. An admin will take a look.
+            This edit is now <Text style={{ fontWeight: FONT_WEIGHT_BOLD }}>awaiting admin review</Text>
+            {result.reason ? ` (${result.reason})` : ''}.
           </Text>
         )}
         <Pressable style={panelStyles.submitButton} onPress={onCancel}>
@@ -660,9 +775,33 @@ export function SuggestEditForm({
         <Text style={panelStyles.panelLabel}>New value</Text>
         {field.kind === 'category' ? (
           <View style={panelStyles.editFieldPicker}>
-            {GYM_CATEGORIES.map((cat) => (
-              <Pressable key={cat} style={[panelStyles.editFieldChip, value === cat && panelStyles.editFieldChipActive]} onPress={() => setValue(cat)}>
-                <Text style={[panelStyles.editFieldChipText, value === cat && panelStyles.editFieldChipTextActive]}>{cat}</Text>
+            {GYM_CATEGORIES.map((cat) => {
+              const active = selectedCategories.includes(cat);
+              return (
+                <Pressable
+                  key={cat}
+                  style={[panelStyles.editFieldChip, active && panelStyles.editFieldChipActive]}
+                  onPress={() =>
+                    setSelectedCategories((prev) => (active ? prev.filter((c) => c !== cat) : [...prev, cat]))
+                  }
+                >
+                  <Text style={[panelStyles.editFieldChipText, active && panelStyles.editFieldChipTextActive]}>{cat}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : field.kind === 'boolean' ? (
+          <View style={panelStyles.editFieldPicker}>
+            {[
+              { label: 'Yes', val: true },
+              { label: 'No', val: false },
+            ].map((opt) => (
+              <Pressable
+                key={opt.label}
+                style={[panelStyles.editFieldChip, boolValue === opt.val && panelStyles.editFieldChipActive]}
+                onPress={() => setBoolValue(opt.val)}
+              >
+                <Text style={[panelStyles.editFieldChipText, boolValue === opt.val && panelStyles.editFieldChipTextActive]}>{opt.label}</Text>
               </Pressable>
             ))}
           </View>
@@ -683,14 +822,12 @@ export function SuggestEditForm({
           value={description}
           onChangeText={setDescription}
           placeholder="How do you know this?"
+          placeholderTextColor={PLACEHOLDER_COLOR}
           multiline
           numberOfLines={3}
         />
       </View>
-      <Pressable
-        style={[panelStyles.submitButton, (submitting || !value.trim() || !description.trim()) && panelStyles.submitButtonDisabled]}
-        onPress={submit}
-      >
+      <Pressable style={[panelStyles.submitButton, !canSubmit && panelStyles.submitButtonDisabled]} onPress={submit}>
         <Text style={panelStyles.submitButtonText}>{submitting ? 'Submitting…' : 'Submit edit'}</Text>
       </Pressable>
     </ScrollView>
@@ -698,16 +835,27 @@ export function SuggestEditForm({
 }
 
 // Shared visual language for the detail panel - used both by the
-// components above and directly by each platform's own MapScreen (for
-// the rows it renders itself: rating/category/description/address/
-// pricing/coordinates). cursor/boxShadow are harmless on native (React
-// Native silently ignores style keys it doesn't recognize).
+// components above and directly by each platform's MapScreen. cursor is
+// harmless on native (RN ignores unrecognized style keys).
+const ACCENT = '#146C5F';
+const TEXT = '#1C2430';
+const TEXT_MUTED = '#8A94A0';
+const TEXT_DIM = '#5B6470';
+const BORDER = '#DDE2E6';
+const GOLD = '#E0A500';
+const BG_MUTED = '#F7F8F9';
+export const PLACEHOLDER_COLOR = '#9AA3AB';
+const FONT_SIZE_SMALL = 12;
+const FONT_SIZE_BODY = 13;
+const FONT_WEIGHT_SEMIBOLD = '600';
+export const FONT_WEIGHT_BOLD = '700';
+
 export const panelStyles = StyleSheet.create({
   panelScroll: { flex: 1 },
   panelScrollContent: { padding: 20, gap: 20 },
   panelRow: { gap: 8 },
-  panelLabel: { fontSize: 11, fontWeight: '600', color: '#8A94A0', textTransform: 'uppercase', letterSpacing: 0.5 },
-  panelValue: { fontSize: 14, color: '#1C2430', lineHeight: 20 },
+  panelLabel: { fontSize: 11, fontWeight: FONT_WEIGHT_SEMIBOLD, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: 0.5 },
+  panelValue: { fontSize: 14, color: TEXT, lineHeight: 20 },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -715,21 +863,21 @@ export const panelStyles = StyleSheet.create({
     // @ts-expect-error - web-only cursor hint, fine for the demo
     cursor: 'pointer',
   },
-  sectionChevron: { fontSize: 12, color: '#8A94A0' },
+  sectionChevron: { fontSize: FONT_SIZE_SMALL, color: TEXT_MUTED },
   sectionHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   reviewForm: {
     gap: 8,
-    backgroundColor: '#F7F8F9',
+    backgroundColor: BG_MUTED,
     borderRadius: 10,
     padding: 12,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#DDE2E6',
+    borderColor: BORDER,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    fontSize: 13,
+    fontSize: FONT_SIZE_BODY,
     backgroundColor: 'white',
   },
   textarea: { minHeight: 60, textAlignVertical: 'top' },
@@ -737,15 +885,16 @@ export const panelStyles = StyleSheet.create({
   // @ts-expect-error - web-only cursor hint, fine for the demo
   starHit: { cursor: 'pointer', padding: 2 },
   star: { fontSize: 18, color: '#D7DBDF' },
-  starFilled: { color: '#E0A500' },
+  starFilled: { color: GOLD },
+  editLink: { color: ACCENT, fontSize: FONT_SIZE_SMALL, fontWeight: FONT_WEIGHT_BOLD },
   submitButton: {
-    backgroundColor: '#146C5F',
+    backgroundColor: ACCENT,
     borderRadius: 8,
     paddingVertical: 9,
     alignItems: 'center',
   },
   submitButtonDisabled: { opacity: 0.6 },
-  submitButtonText: { color: 'white', fontWeight: '600', fontSize: 13 },
+  submitButtonText: { color: 'white', fontWeight: FONT_WEIGHT_SEMIBOLD, fontSize: FONT_SIZE_BODY },
   reviewCard: {
     gap: 4,
     paddingTop: 10,
@@ -753,21 +902,21 @@ export const panelStyles = StyleSheet.create({
     borderTopColor: '#EFEFEF',
   },
   reviewCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  reviewAuthor: { fontSize: 13, fontWeight: '700', color: '#1C2430' },
-  reviewStars: { fontSize: 12, color: '#E0A500' },
+  reviewAuthor: { fontSize: FONT_SIZE_BODY, fontWeight: FONT_WEIGHT_BOLD, color: TEXT },
+  reviewStars: { fontSize: FONT_SIZE_SMALL, color: GOLD },
   chatBox: { gap: 8 },
   chatBubble: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' },
-  chatBubbleUser: { backgroundColor: '#146C5F', alignSelf: 'flex-end' },
-  chatBubbleAssistant: { backgroundColor: '#F7F8F9', alignSelf: 'flex-start' },
-  chatBubbleUserText: { color: 'white', fontSize: 13, lineHeight: 18 },
-  chatBubbleAssistantText: { color: '#1C2430', fontSize: 13, lineHeight: 18 },
+  chatBubbleUser: { backgroundColor: ACCENT, alignSelf: 'flex-end' },
+  chatBubbleAssistant: { backgroundColor: BG_MUTED, alignSelf: 'flex-start' },
+  chatBubbleUserText: { color: 'white', fontSize: FONT_SIZE_BODY, lineHeight: 18 },
+  chatBubbleAssistantText: { color: TEXT, fontSize: FONT_SIZE_BODY, lineHeight: 18 },
   chatInputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
   chatInput: { flex: 1 },
   chatInputLarge: { minHeight: 72, textAlignVertical: 'top' },
   chatSendButton: { paddingHorizontal: 16 },
   editFieldPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  editFieldChip: { borderWidth: 1, borderColor: '#DDE2E6', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
-  editFieldChipActive: { backgroundColor: '#146C5F', borderColor: '#146C5F' },
-  editFieldChipText: { fontSize: 12, color: '#5B6470', fontWeight: '600' },
+  editFieldChip: { borderWidth: 1, borderColor: BORDER, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
+  editFieldChipActive: { backgroundColor: ACCENT, borderColor: ACCENT },
+  editFieldChipText: { fontSize: FONT_SIZE_SMALL, color: TEXT_DIM, fontWeight: FONT_WEIGHT_SEMIBOLD },
   editFieldChipTextActive: { color: 'white' },
 });

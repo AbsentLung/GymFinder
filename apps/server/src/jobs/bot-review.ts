@@ -347,10 +347,13 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
   }
   if (proposed.kind === "add_gym") {
     // Stamped so the weekly OSM refresh doesn't overwrite this for a year.
+    // A plain `${proposed.categories}` drizzle-expands an empty array to
+    // a bare "()", which Postgres rejects as a syntax error.
+    const categoriesSql = sql`ARRAY[${sql.join(proposed.categories.map((c) => sql`${c}`), sql`, `)}]::text[]`
     const inserted = await tx.execute(sql`
       INSERT INTO gyms (name, location, address, description, categories, accepts_drop_in, has_trial, name_location_decided_at)
       VALUES (${proposed.name}, ST_SetSRID(ST_MakePoint(${proposed.lng}, ${proposed.lat}), 4326),
-        ${proposed.address ?? null}, ${proposed.description ?? null}, ${proposed.categories},
+        ${proposed.address ?? null}, ${proposed.description ?? null}, ${categoriesSql},
         ${proposed.acceptsDropIn ?? null}, ${proposed.hasTrial ?? null}, now())
       RETURNING id
     `)
@@ -374,6 +377,16 @@ async function applyProposedChange(tx: any, proposed: ProposedChange, gymId: num
 
   if (proposed.kind === "field") {
     const column = FIELD_TO_COLUMN[proposed.field]
+    // Drizzle's sql`` expands a plain array interpolation into a value
+    // LIST, not a bound array - invalid for a text[] column. ARRAY[...]
+    // via sql.join is the form that actually binds a real array literal.
+    if (proposed.field === "categories") {
+      const categories = proposed.newValue as string[]
+      await tx.execute(
+        sql`UPDATE gyms SET categories = ARRAY[${sql.join(categories.map((c) => sql`${c}`), sql`, `)}]::text[] WHERE id = ${gymId}`
+      )
+      return
+    }
     // Re-stamps name_location_decided_at - a fresh decision, respected
     // by the weekly OSM refresh for another year.
     if (proposed.field === "name") {
