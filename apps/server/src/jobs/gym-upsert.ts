@@ -3,6 +3,7 @@
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { isDuplicateMatch } from "../lib.js"
+import { tryReverseGeocodeCountryCode } from "../geocode.js"
 import type { RawGym } from "../interfaces/source.js"
 
 export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: number; isNew: boolean } | null> {
@@ -51,9 +52,10 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
         ON CONFLICT (source, external_id) DO NOTHING
       `)
     } else {
+      const countryCode = await tryReverseGeocodeCountryCode(g.lat, g.lng)
       const inserted = await db.execute<{ id: number }>(sql`
-        INSERT INTO gyms (name, location, address, description)
-        VALUES (${g.name}, ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326), ${g.address ?? null}, ${g.description ?? null})
+        INSERT INTO gyms (name, location, address, description, country_code)
+        VALUES (${g.name}, ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326), ${g.address ?? null}, ${g.description ?? null}, ${countryCode})
         RETURNING id
       `)
       gymId = inserted.rows[0].id

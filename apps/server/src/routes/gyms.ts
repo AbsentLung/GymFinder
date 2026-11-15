@@ -6,6 +6,10 @@ import { sql, eq, and, desc, lt } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { gymPrices, reviews } from "../db/schema.js"
 import { requireUser, getSessionUser } from "../auth-guard.js"
+import { toLocalDisplayPrice } from "../lib.js"
+import { getFxRates } from "../fx.js"
+
+const ALREADY_REVIEWED_ERROR = "You've already reviewed this gym - use PUT to edit it"
 
 interface GymDetailRow {
   [key: string]: unknown
@@ -23,12 +27,13 @@ interface GymDetailRow {
   updated_at: string
   rating: number | null
   review_count: number
+  country_code: string | null
 }
 
 async function fetchGymDetail(id: number) {
   const result = await db.execute<GymDetailRow>(sql`
     SELECT g.id, g.name, ST_X(g.location) AS lng, ST_Y(g.location) AS lat, g.address, g.description,
-           g.categories, g.accepts_drop_in, g.has_trial, g.details, g.status, g.updated_at,
+           g.categories, g.accepts_drop_in, g.has_trial, g.details, g.status, g.updated_at, g.country_code,
            (SELECT avg(rating)::float FROM reviews WHERE gym_id = g.id) AS rating,
            (SELECT count(*)::int FROM reviews WHERE gym_id = g.id) AS review_count
     FROM gyms g WHERE g.id = ${id}
@@ -37,6 +42,8 @@ async function fetchGymDetail(id: number) {
   if (!gym) return null
 
   const prices = await db.select().from(gymPrices).where(eq(gymPrices.gymId, id))
+  // Stored as USD always - converted to the gym's local currency here.
+  const rates = prices.length > 0 ? await getFxRates() : {}
   // trialDetails/openingHours promoted to top-level fields; `details`
   // carries whatever's left of the jsonb catch-all.
   const { trialDetails, openingHours, ...restDetails } = (gym.details ?? {}) as Record<string, unknown>
@@ -49,20 +56,13 @@ async function fetchGymDetail(id: number) {
     categories: gym.categories ?? [],
     description: gym.description,
     acceptsDropIn: gym.accepts_drop_in,
-    // null, not coerced to false - "we don't know" and "confirmed no
-    // trial" are different facts (same reasoning as acceptsDropIn in
-    // apps/mobile/src/components/gym-panels.tsx: "no price means not
-    // known, never no"). Caught wiring up the app's own TrialSection,
-    // which needs that distinction to show "Not known yet" instead of
-    // a false "No trial."
+    // null, not coerced to false - "don't know" and "confirmed no trial" are different facts.
     trial: { available: gym.has_trial, details: trialDetails ?? null },
     openingHours: openingHours ?? null,
     details: restDetails,
     prices: prices.map((p) => ({
       kind: p.kind,
-      amountMinor: p.amountMinor,
-      currency: p.currency,
-      usdCents: p.usdCents,
+      ...toLocalDisplayPrice({ amountMinor: p.amountMinor, currency: p.currency, usdCents: p.usdCents }, gym.country_code, rates),
       sourceKind: p.sourceKind,
       sourceUrl: p.sourceUrl,
       verifiedBy: p.verifiedBy,
@@ -146,12 +146,9 @@ export const gymsRoutes: FastifyPluginAsyncZod = async (app) => {
       const { id } = request.params
       const userId = request.sessionUser!.id
       const [existing] = await db.select({ id: reviews.id }).from(reviews).where(and(eq(reviews.gymId, id), eq(reviews.userId, userId)))
-      // One review per user per gym (API.md decision #9) - a second
-      // attempt is a 409 pointing at PUT, not a silent second row. This
-      // check alone can't close the race between two quick POSTs (both
-      // can pass it before either inserts) - the catch below is what
-      // actually closes it, via reviews_gym_user_unique.
-      if (existing) return reply.status(409).send({ error: "You've already reviewed this gym - use PUT to edit it" })
+      // One review per user per gym (API.md decision #9) - this check alone can't close the
+      // race between two quick POSTs; the catch below closes it via reviews_gym_user_unique.
+      if (existing) return reply.status(409).send({ error: ALREADY_REVIEWED_ERROR })
 
       try {
         const [created] = await db
@@ -161,12 +158,9 @@ export const gymsRoutes: FastifyPluginAsyncZod = async (app) => {
         reply.status(201)
         return serializeReview({ ...created, userName: null }, userId)
       } catch (e) {
-        // Postgres SQLSTATE, not an HTTP status - 23505 unique_violation
-        // (the race above), 23503 foreign_key_violation (gym doesn't
-        // exist - there's no pre-check for that, unlike the review-
-        // already-exists case). Both used to bubble up as a bare 500.
+        // Postgres SQLSTATE, not an HTTP status - 23505 is the race above, 23503 a missing gym.
         const code = (e as { code?: string }).code
-        if (code === "23505") return reply.status(409).send({ error: "You've already reviewed this gym - use PUT to edit it" })
+        if (code === "23505") return reply.status(409).send({ error: ALREADY_REVIEWED_ERROR })
         if (code === "23503") return reply.status(404).send({ error: "Gym not found" })
         throw e
       }

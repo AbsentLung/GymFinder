@@ -1,0 +1,2 @@
+ALTER TABLE "gym_prices" DROP CONSTRAINT "gym_prices_source_kind_check";--> statement-breakpoint
+ALTER TABLE "gym_prices" ADD CONSTRAINT "gym_prices_source_kind_check" CHECK ("gym_prices"."source_kind" IN ('gym_website', 'price_menu', 'user', 'review', 'chat', 'sweep_research'));

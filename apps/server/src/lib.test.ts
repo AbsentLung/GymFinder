@@ -7,9 +7,13 @@ import {
   FAILED_FETCH_BACKOFF_MS,
   isBboxCovered,
   getCountryCurrency,
+  COUNTRY_TO_CURRENCY,
   convertToUsdCents,
   amountMinorToMajor,
   amountMajorToMinor,
+  roundToSolidDigits,
+  convertUsdCentsToLocal,
+  toLocalDisplayPrice,
   extractLatLngFromMapsHref,
   bboxToGoogleMapsZoom,
   categoriesFromRawText,
@@ -142,6 +146,51 @@ describe("amountMajorToMinor", () => {
   })
   it("is the exact inverse of amountMinorToMajor for a zero-decimal currency", () => {
     expect(amountMajorToMinor(amountMinorToMajor(150000, "IDR"), "IDR")).toBe(150000)
+  })
+})
+
+describe("roundToSolidDigits", () => {
+  it("rounds to 2 significant figures", () => {
+    expect(roundToSolidDigits(347)).toBe(350)
+    expect(roundToSolidDigits(18003)).toBe(18000)
+  })
+  it("leaves an already-solid small number alone", () => {
+    expect(roundToSolidDigits(44)).toBe(44)
+  })
+  it("passes zero through", () => {
+    expect(roundToSolidDigits(0)).toBe(0)
+  })
+})
+
+describe("convertUsdCentsToLocal", () => {
+  it("passes USD straight through", () => {
+    expect(convertUsdCentsToLocal(1000, "USD", {})).toBe(1000)
+  })
+  it("converts and rounds to a solid local amount", () => {
+    // $10.00 at ~34.17 THB/USD -> 341.7 major -> rounds to 340 -> 34000 minor.
+    expect(convertUsdCentsToLocal(1000, "THB", { THB: 34.17 })).toBe(34000)
+  })
+  it("throws on an unknown currency", () => {
+    expect(() => convertUsdCentsToLocal(1000, "ZZZ", { THB: 34 })).toThrow()
+  })
+})
+
+describe("toLocalDisplayPrice", () => {
+  it("converts to the gym's country's currency", () => {
+    const price = { amountMinor: 1000, currency: "USD", usdCents: 1000 }
+    const result = toLocalDisplayPrice(price, "TH", { THB: 34.17 })
+    expect(result.currency).toBe("THB")
+    expect(result.amountMinor).toBe(34000)
+  })
+  it("falls back to USD for an unknown or missing country", () => {
+    const price = { amountMinor: 1000, currency: "USD", usdCents: 1000 }
+    expect(toLocalDisplayPrice(price, null, {}).currency).toBe("USD")
+  })
+})
+
+describe("COUNTRY_TO_CURRENCY", () => {
+  it("maps Thailand to THB, matching getCountryCurrency's own test fixture", () => {
+    expect(getCountryCurrency("TH", COUNTRY_TO_CURRENCY)).toBe("THB")
   })
 })
 

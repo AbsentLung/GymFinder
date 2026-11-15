@@ -8,7 +8,7 @@ import { cache } from "../cache/index.js"
 import { llm } from "../llm/index.js"
 import { WEB_SEARCH_TOOL, FETCH_URL_TOOL, GOOGLE_MAPS_WEBSITE_TOOL } from "../llm/tools.js"
 import { tryReverseGeocode } from "../geocode.js"
-import { createGymChange, NON_PRICE_FIELDS } from "./bot-review.js"
+import { createGymChange, normalizeFieldValue, NON_PRICE_FIELDS } from "./bot-review.js"
 import type { ProposedChange, PriceKind, NonPriceField } from "./bot-review.js"
 import { amountMajorToMinor, GYM_CATEGORIES } from "../lib.js"
 import type { ToolDef, ChatMessage } from "../interfaces/llm.js"
@@ -126,10 +126,12 @@ export async function processChat({ chatId, gymId }: ChatPayload): Promise<void>
         if (input.sourceUrl) sources.push(input.sourceUrl)
       } else if (use.name === "record_gym_field") {
         const input = use.input as { field: NonPriceField; value: unknown }
+        const value = normalizeFieldValue(input.field, input.value)
+        if (value === null) continue
         const proposed: ProposedChange = {
           kind: "field",
           field: input.field,
-          newValue: input.value,
+          newValue: value,
           justification: "Found by the chat assistant while answering a traveler's question.",
         }
         await createGymChange(null, gymId, proposed)
