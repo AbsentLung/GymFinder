@@ -152,6 +152,13 @@ export const gyms = pgTable(
     // Opening hours, amenities, website, trial details, etc.
     details: jsonb("details"),
     status: text("status").notNull().default("active"),
+    // Stamped whenever an approved "name" field change or a brand-new
+    // gym is applied (bot-review.ts's applyProposedChange) - lets the
+    // weekly OSM refresh tell "nobody's ever confirmed this" from "an
+    // admin/bot already confirmed this, recently" and skip overwriting
+    // name/location in the second case. Null means OSM is still
+    // authoritative (never confirmed).
+    nameLocationDecidedAt: timestamp("name_location_decided_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -277,6 +284,17 @@ export const tileFetches = pgTable(
   },
   (table) => [uniqueIndex("tile_fetches_geohash_source_unique").on(table.geohash, table.source)]
 )
+
+// A single-row cache, not a history table - "daily rates table" (API.md
+// 2.8) just means "shared across processes/workers", unlike the old
+// demo's in-memory fxCache (server/index.js) which each process would
+// otherwise refetch independently. src/fx.ts upserts this one row at
+// most once a day; nothing ever reads a past day's rates.
+export const fxRates = pgTable("fx_rates", {
+  id: text("id").primaryKey().default("latest"),
+  rates: jsonb("rates").notNull(),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+})
 
 export const reviews = pgTable(
   "reviews",
