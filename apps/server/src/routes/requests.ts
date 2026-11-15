@@ -1,18 +1,28 @@
-// Add-gym/update-gym requests, shared status/retry endpoints, and "My
-// requests" listing - add-gym and update-gym share almost everything
-// (one request + one gym_changes row, then a queued bot-review job).
-// POST /v1/sweeps is a separate slice, not here yet.
+// Add-gym/update-gym/sweep requests, shared status/retry endpoints, and
+// "My requests" listing - share enough (one request row, a derived
+// status, a common response shape) to build together.
 import type { FastifyPluginAsyncZod } from "@fastify/type-provider-zod"
 import { z } from "zod"
-import { and, desc, eq, lt } from "drizzle-orm"
+import { and, desc, eq, lt, sql } from "drizzle-orm"
 import { db } from "../db/index.js"
-import { gymChanges, gyms, requests } from "../db/schema.js"
+import { gymChanges, gyms, requests, tileFetches } from "../db/schema.js"
+import { queue } from "../queue/index.js"
 import { requireUser } from "../auth-guard.js"
-import { requireDescription, GYM_CATEGORIES } from "../lib.js"
+import { requireDescription, GYM_CATEGORIES, isFetchRowFresh } from "../lib.js"
 import { NON_PRICE_FIELDS, createGymChange } from "../jobs/bot-review.js"
 import type { ProposedChange } from "../jobs/bot-review.js"
+import { checkRateLimit } from "../rate-limit.js"
 
 const BOT_REVIEW_DEADLINE_MS = 10 * 60 * 1000
+const SWEEP_DEADLINE_MS = 60 * 60 * 1000
+// Same week-long window as tiles.ts's Overpass staleness.
+const SWEEP_STALE_MS = 7 * 24 * 60 * 60 * 1000
+const GEOHASH5_PATTERN = /^[0-9b-hj-km-np-z]{5}$/
+// A sweep launches a real browser and scrapes Google - tighter than a plain read.
+const SWEEP_RATE_LIMIT_MAX = 5
+const SWEEP_RATE_LIMIT_WINDOW_SECONDS = 60 * 60
+
+const sweepBodySchema = z.object({ geohash: z.string().regex(GEOHASH5_PATTERN, "must be a 5-character geohash") })
 
 const priceProposalSchema = z.object({
   priceKind: z.enum(["day_pass", "week_pass", "month_pass"]),
@@ -126,6 +136,62 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   )
 
+  app.post(
+    "/v1/sweeps",
+    { preHandler: requireUser, schema: { body: sweepBodySchema } },
+    async (request, reply) => {
+      const { geohash } = request.body
+      const allowed = await checkRateLimit(`sweep:user:${request.sessionUser!.id}`, SWEEP_RATE_LIMIT_MAX, SWEEP_RATE_LIMIT_WINDOW_SECONDS)
+      if (!allowed) return reply.status(429).send({ error: "Too many sweeps - try again later" })
+
+      // A recently-swept tile returns 200 with the already-completed
+      // request - reuses tile_fetches' own staleness tracking. Status-
+      // aware: a failed sweep only blocks a retry for a short backoff,
+      // not the full week a real completed sweep does.
+      const [fetchRow] = await db
+        .select()
+        .from(tileFetches)
+        .where(and(eq(tileFetches.geohash, geohash), eq(tileFetches.source, "google_maps")))
+      if (isFetchRowFresh(fetchRow, SWEEP_STALE_MS)) {
+        const [recent] = await db
+          .select()
+          .from(requests)
+          .where(and(eq(requests.kind, "sweep"), sql`${requests.input}->>'geohash' = ${geohash}`))
+          .orderBy(desc(requests.id))
+          .limit(1)
+        if (recent) return serializeRequest(recent.id)
+        // No stored request to point at - report from tile_fetches alone.
+        return {
+          id: null,
+          kind: "sweep",
+          status: "completed",
+          createdAt: fetchRow.lastFetchedAt,
+          deadline: fetchRow.lastFetchedAt,
+          result: { gymsFound: fetchRow.gymsFound ?? 0, gymsNew: 0 },
+          failureReason: null,
+          changes: [],
+        }
+      }
+
+      // A tile already queued attaches to the existing request row.
+      const [pending] = await db
+        .select()
+        .from(requests)
+        .where(and(eq(requests.kind, "sweep"), eq(requests.status, "pending"), sql`${requests.input}->>'geohash' = ${geohash}`))
+        .limit(1)
+      if (pending) return serializeRequest(pending.id)
+
+      const [created] = await db
+        .insert(requests)
+        .values({ userId: request.sessionUser!.id, kind: "sweep", deadline: new Date(Date.now() + SWEEP_DEADLINE_MS), input: { geohash } })
+        .returning()
+      // "-" not ":" - BullMQ rejects a custom id containing a colon.
+      await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep-${geohash}` })
+      reply.status(202)
+      return serializeRequest(created.id)
+    }
+  )
+
   app.get(
     "/v1/requests/:id",
     { preHandler: requireUser, schema: { params: z.object({ id: z.coerce.number().int() }) } },
@@ -153,6 +219,17 @@ export const requestsRoutes: FastifyPluginAsyncZod = async (app) => {
         const proposed: ProposedChange = { kind: "add_gym", ...input }
         const requestId = await createRequest(request.sessionUser!.id, "add_gym", input, null, proposed)
         return serializeRequest(requestId)
+      }
+
+      if (row.kind === "sweep") {
+        const { geohash } = row.input as { geohash: string }
+        const [created] = await db
+          .insert(requests)
+          .values({ userId: request.sessionUser!.id, kind: "sweep", deadline: new Date(Date.now() + SWEEP_DEADLINE_MS), input: { geohash } })
+          .returning()
+        // "-" not ":" - BullMQ rejects a custom id containing a colon.
+      await queue.add("sweep", { requestId: created.id, geohash5: geohash }, { jobId: `sweep-${geohash}` })
+        return serializeRequest(created.id)
       }
 
       const input = row.input as ChangeBody & { gymId: number }
