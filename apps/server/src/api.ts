@@ -16,10 +16,17 @@ import { chatRoutes } from "./routes/chat.js"
 import { meRoutes } from "./routes/me.js"
 
 export async function buildApp() {
-  const app = Fastify({ logger: true })
+  // Without this, request.ip is the proxy's address behind a real CDN.
+  const app = Fastify({ logger: true, trustProxy: process.env.NODE_ENV === "production" })
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
-  await app.register(cors)
+  // Same allow-list as auth.ts's trustedOrigins; methods must be listed
+  // explicitly or PUT/PATCH/DELETE routes fail preflight silently.
+  await app.register(cors, {
+    origin: ["travelapp://", config.webOrigin, ...(process.env.NODE_ENV !== "production" ? [/^exp:\/\//] : [])],
+    credentials: true,
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
+  })
 
   // Not under /v1 (API.md 1.6) - for the load balancer/Docker, not the app.
   app.get("/healthz", async () => ({ status: "ok" }))
