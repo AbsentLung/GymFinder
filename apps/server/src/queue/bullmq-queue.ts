@@ -3,7 +3,11 @@
 // Redis run before trusting it in production.
 import { Queue, Worker, type ConnectionOptions } from "bullmq"
 import { Redis } from "ioredis"
-import type { QueueInterface, JobOptions, JobHandler } from "../interfaces/queue.js"
+import type { QueueInterface, JobOptions, JobHandler, JobPriority } from "../interfaces/queue.js"
+
+// BullMQ: lower number runs first, opposite of pg-boss. "normal" needs
+// an explicit value too - an unset priority runs ahead of "high".
+const PRIORITY_RANK: Record<JobPriority, number> = { high: 1, normal: 50, low: 100 }
 
 export class BullMqQueue implements QueueInterface {
   private connection: ConnectionOptions
@@ -37,7 +41,7 @@ export class BullMqQueue implements QueueInterface {
 
   async add<T extends Record<string, unknown>>(queueName: string, payload: T, opts: JobOptions = {}) {
     const job = await this.getQueue(queueName).add(queueName, payload, {
-      priority: opts.priority,
+      priority: opts.priority !== undefined ? PRIORITY_RANK[opts.priority] : undefined,
       delay: opts.delay,
       jobId: opts.jobId,
       // BullMQ keeps a finished job's id by default - without this, a

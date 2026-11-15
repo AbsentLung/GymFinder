@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Canggu, Bali",
+    "minLat": -8.72,
+    "maxLat": -8.60,
+    "minLng": 115.10,
+    "maxLng": 115.20
+  },
+  {
+    "name": "Chiang Mai, Thailand",
+    "minLat": 18.74,
+    "maxLat": 18.84,
+    "minLng": 98.94,
+    "maxLng": 99.02
+  }
+]
