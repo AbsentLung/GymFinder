@@ -22,6 +22,12 @@ These were agreed with Joey. Follow them unless he changes them; update this fil
 - Use the Photon geocoder (photon.komoot.io) with search-as-you-type (debounce requests).
 - Never use the public Nominatim server in production.
 
+### Gym location names (decided by Joey 2026-11-07, details in LOCATION_NAMES.md)
+- Regions only for now, no cities (Joey, 2026-11-07): every gym stores `gyms.region_id` → `regions` (state / province / island polygons), plus `gyms.country_code` and free-text `gyms.postcode`. The app shows "Region, Country". Never copy the region name onto `gyms`, and never geocode at read time; read routes join and return a `place` object.
+- Regions come from geoBoundaries CGAZ ADM1, loaded by `npm run seed:regions` (separate from migrations; `--fixture` for tests). CC BY 4.0: attribution required.
+- Fill on write with the `gym-region` worker job (`ST_Contains`) when a gym is created or moves. Photon reverse-geocoding is only the fallback job when no polygon matches: rate-limited (~1 req/s shared), retried, never blocks the gym, and only maps onto existing regions. `npm run backfill:regions` fills old gyms.
+- Don't use "admin" in these names (it clashes with the admin role).
+
 ### Gym data
 - Fetch gyms from the Overpass API (`leisure=fitness_centre`) and merge them with user-submitted gyms.
 - Postgres + PostGIS is the source of truth: gyms, user-submitted gyms, and `last_fetched` per area.

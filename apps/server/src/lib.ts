@@ -183,12 +183,13 @@ export interface OsmGymFields {
   address: string | null
   description: string | null
   categories: string[]
+  postcode: string | null
 }
 
 // OSM tags are free-form and inconsistently present - every field here
 // is "use it if present," never required.
 export function osmTagsToGymFields(tags: OsmTags | null | undefined): OsmGymFields {
-  if (!tags) return { address: null, description: null, categories: [] }
+  if (!tags) return { address: null, description: null, categories: [], postcode: null }
 
   const streetLine = [tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" ")
   const addressParts = [streetLine, tags["addr:city"], tags["addr:postcode"]].filter(Boolean)
@@ -200,7 +201,7 @@ export function osmTagsToGymFields(tags: OsmTags | null | undefined): OsmGymFiel
     ? Array.from(new Set(tags.sport.split(";").flatMap((s) => categoriesFromRawText(s.trim()))))
     : []
 
-  return { address, description, categories }
+  return { address, description, categories, postcode: tags["addr:postcode"]?.trim() || null }
 }
 
 // Returns an error string, or null when valid.

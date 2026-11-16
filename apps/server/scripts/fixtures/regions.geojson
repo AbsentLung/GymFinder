@@ -1,0 +1,10 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {"type": "Feature", "properties": {"sourceRef": "fixture:IDN-BA", "name": "Bali", "iso3": "IDN"}, "geometry": {"type": "Polygon", "coordinates": [[[114.4, -8.9], [115.8, -8.9], [115.8, -8.0], [114.4, -8.0], [114.4, -8.9]]]}},
+  {"type": "Feature", "properties": {"sourceRef": "fixture:IDN-JI", "name": "East Java", "iso3": "IDN"}, "geometry": {"type": "Polygon", "coordinates": [[[111.0, -8.8], [114.3, -8.8], [114.3, -7.0], [111.0, -7.0], [111.0, -8.8]]]}},
+  {"type": "Feature", "properties": {"sourceRef": "fixture:CHN-HK", "name": "Hong Kong Special Administrative Region", "iso3": "CHN"}, "geometry": {"type": "Polygon", "coordinates": [[[114.0, 22.15], [114.45, 22.15], [114.45, 22.55], [114.0, 22.55], [114.0, 22.15]]]}},
+  {"type": "Feature", "properties": {"sourceRef": "fixture:PRT-EVO", "name": "Évora", "iso3": "PRT"}, "geometry": {"type": "Polygon", "coordinates": [[[-8.3, 38.2], [-7.2, 38.2], [-7.2, 38.9], [-8.3, 38.9], [-8.3, 38.2]]]}},
+  {"type": "Feature", "properties": {"sourceRef": "fixture:112", "name": "Aksai Chin", "iso3": "112"}, "geometry": {"type": "Polygon", "coordinates": [[[79.0, 35.0], [80.0, 35.0], [80.0, 36.0], [79.0, 36.0], [79.0, 35.0]]]}}
+ ]
+}

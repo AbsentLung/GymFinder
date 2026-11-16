@@ -3,7 +3,8 @@
 import { sql } from "drizzle-orm"
 import { db } from "../db/index.js"
 import { isDuplicateMatch } from "../lib.js"
-import { tryReverseGeocodeCountryCode } from "../geocode.js"
+import { findRegionAt } from "../region-queries.js"
+import { enqueueGymRegion } from "./gym-region.js"
 import type { RawGym } from "../interfaces/source.js"
 
 export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: number; isNew: boolean } | null> {
@@ -18,15 +19,20 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
   if (existing.rows[0]) {
     gymId = existing.rows[0].gym_id
     // name/location: source is authoritative except within a year of an
-    // approved admin/bot decision. address/description: COALESCE only.
-    await db.execute(sql`
+    // approved admin/bot decision. address/description/postcode: COALESCE only.
+    // The CTE sees the row before the update, so `moved` compares old vs new.
+    const updated = await db.execute<{ moved: boolean }>(sql`
+      WITH before AS (SELECT location FROM gyms WHERE id = ${gymId})
       UPDATE gyms SET
         name = CASE WHEN name_location_decided_at IS NULL OR name_location_decided_at < now() - interval '1 year' THEN ${g.name} ELSE name END,
         location = CASE WHEN name_location_decided_at IS NULL OR name_location_decided_at < now() - interval '1 year'
           THEN ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326) ELSE location END,
-        address = COALESCE(address, ${g.address ?? null}), description = COALESCE(description, ${g.description ?? null})
+        address = COALESCE(address, ${g.address ?? null}), description = COALESCE(description, ${g.description ?? null}),
+        postcode = COALESCE(postcode, ${g.postcode ?? null})
       WHERE id = ${gymId}
+      RETURNING NOT ST_Equals(gyms.location, (SELECT location FROM before)) AS moved
     `)
+    if (updated.rows[0]?.moved) await enqueueGymRegion(gymId)
   } else {
     // A source can map the same real gym under two element ids - plain
     // external-id matching can't catch that, so check name+proximity too.
@@ -44,7 +50,8 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
     if (duplicate) {
       gymId = duplicate.gym_id
       await db.execute(sql`
-        UPDATE gyms SET address = COALESCE(address, ${g.address ?? null}), description = COALESCE(description, ${g.description ?? null})
+        UPDATE gyms SET address = COALESCE(address, ${g.address ?? null}), description = COALESCE(description, ${g.description ?? null}),
+          postcode = COALESCE(postcode, ${g.postcode ?? null})
         WHERE id = ${gymId}
       `)
       await db.execute(sql`
@@ -52,14 +59,16 @@ export async function upsertGym(source: string, g: RawGym): Promise<{ gymId: num
         ON CONFLICT (source, external_id) DO NOTHING
       `)
     } else {
-      const countryCode = await tryReverseGeocodeCountryCode(g.lat, g.lng)
+      // Set now so price currency is right before the gym-region job runs.
+      const countryCode = (await findRegionAt(g.lat, g.lng))?.countryCode ?? null
       const inserted = await db.execute<{ id: number }>(sql`
-        INSERT INTO gyms (name, location, address, description, country_code)
-        VALUES (${g.name}, ST_SetSRID(ST_MakePoint(${g.lng}, ${g.lat}), 4326), ${g.address ?? null}, ${g.description ?? null}, ${countryCode})
+        INSERT INTO gyms (name, location, address, description, postcode, country_code)
+        VALUES (${g.name}, ${point}, ${g.address ?? null}, ${g.description ?? null}, ${g.postcode ?? null}, ${countryCode})
         RETURNING id
       `)
       gymId = inserted.rows[0].id
       isNew = true
+      await enqueueGymRegion(gymId)
       await db.execute(sql`
         INSERT INTO gym_source_refs (gym_id, source, external_id) VALUES (${gymId}, ${source}, ${g.externalId})
         ON CONFLICT (source, external_id) DO NOTHING
